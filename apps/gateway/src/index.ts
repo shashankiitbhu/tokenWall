@@ -10,9 +10,11 @@ import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
 import fastifyWebsocket from '@fastify/websocket';
+import cors from '@fastify/cors';
 import { controlPlane } from './control-plane.js';
 
 const server = fastify({ logger: false });
+server.register(cors as any, { origin: '*' });
 server.register(fastifyWebsocket as any);
 server.register(async function (f) {
   controlPlane.registerWebsocket(f);
@@ -26,6 +28,23 @@ const contextAnalyzer = new ContextAnalyzer();
 const modelRouter = new ModelRouter();
 const promptOptimizer = new PromptOptimizer();
 const telemetryLogger = new TelemetryLogger(db);
+
+// Admin API
+server.get('/api/admin/sessions', async (request, reply) => {
+  const sessions = telemetryLogger.getSessions(50);
+  return reply.send(sessions);
+});
+
+server.get('/api/admin/events/:sessionId', async (request: any, reply) => {
+  const { sessionId } = request.params;
+  const events = telemetryLogger.reconstructTimeline(sessionId);
+  return reply.send(events);
+});
+
+server.get('/api/admin/budgets', async (request, reply) => {
+  const budgets = db.getBudgets(null);
+  return reply.send(budgets);
+});
 
 const PORT = 1984;
 
@@ -71,6 +90,17 @@ async function handleInterception(
     db.createSession(sessionId, projectId, configManager.getConfig().sessionLimit);
   }
 
+  // Generate Request ID early so we can track events
+  const requestId = Math.random().toString(36).substring(2, 11);
+
+  telemetryLogger.emitEvent({
+    eventType: 'request_received',
+    sessionId,
+    requestId,
+    provider,
+    metadata: { url: targetUrl }
+  });
+
   // Parse into common NormalizedRequest
   const parsedRequest = ProviderRegistry.parseRequest(provider, request.body, request.url);
 
@@ -88,8 +118,16 @@ async function handleInterception(
   // Run loop detector
   const loopCheck = loopDetector.detect(sessionId, firstUserMsg ? firstUserMsg.content : '', estimation.estimatedInputTokens);
   if (loopCheck.loopDetected) {
+    telemetryLogger.emitEvent({
+      eventType: 'runaway_loop_detected',
+      sessionId,
+      requestId,
+      provider,
+      model: parsedRequest.model,
+      metadata: { reason: loopCheck.reason }
+    });
     TerminalUI.drawBlockedAlert(loopCheck.reason || 'Runaway loop detected');
-    telemetryLogger.reconcileRequest('dummy', 0, 'blocked', 'failed');
+    telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'failed'); // using generated requestId instead of dummy
     return reply.status(429).send({
       error: {
         message: `TokenWall blocked request: ${loopCheck.reason}`,
@@ -99,22 +137,34 @@ async function handleInterception(
     });
   }
 
-  // Generate Request ID
-  const requestId = Math.random().toString(36).substring(2, 11);
-
   // Run budget evaluation (Transactional Reservation)
   const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
 
   if (!budgetCheck.allowed) {
+    telemetryLogger.emitEvent({
+      eventType: 'budget_limit_exceeded',
+      sessionId,
+      requestId,
+      provider,
+      model: parsedRequest.model,
+      metadata: { reason: budgetCheck.blockedReason, estimatedCost: estimation.estimatedCost }
+    });
     TerminalUI.drawBlockedAlert(budgetCheck.blockedReason || 'Budget Exceeded');
-    // It was never reserved, so no reconciliation needed for the reservation itself, but we can log it.
-    // Actually evaluate() reserves if allowed, but rejects if not. So no reservation exists.
     return reply.status(402).send({
       error: {
         message: `TokenWall blocked request: ${budgetCheck.blockedReason}`,
         type: 'budget_exceeded',
         code: 'payment_required'
       }
+    });
+  } else {
+    telemetryLogger.emitEvent({
+      eventType: 'reservation_created',
+      sessionId,
+      requestId,
+      provider,
+      model: parsedRequest.model,
+      metadata: { estimatedCost: estimation.estimatedCost }
     });
   }
 
@@ -125,6 +175,15 @@ async function handleInterception(
   const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0 || routingOptions.shouldRoute;
   
   if (needsWarning) {
+    telemetryLogger.emitEvent({
+      eventType: 'approval_requested',
+      sessionId,
+      requestId,
+      provider,
+      model: parsedRequest.model,
+      metadata: { estimatedCost: estimation.estimatedCost, warnings: contextReport.inefficiencies.length }
+    });
+
     const configSettings = configManager.getConfig();
     const isHeadless = configSettings.headless || process.env.TOKENWALL_HEADLESS === 'true';
     if (isHeadless) {
@@ -135,16 +194,20 @@ async function handleInterception(
         if (sortedAlts.length > 0) {
            action = 'switch_model';
            chosenModel = sortedAlts[0].model;
+           telemetryLogger.emitEvent({ eventType: 'policy_triggered', sessionId, requestId, metadata: { policy: 'auto_switch', chosenModel } });
         } else {
            action = 'approve';
         }
       } else if (configSettings.autoApproveLimit && estimation.estimatedCost <= configSettings.autoApproveLimit) {
         action = 'approve';
+        telemetryLogger.emitEvent({ eventType: 'auto_approved', sessionId, requestId, metadata: { limit: configSettings.autoApproveLimit } });
       } else if (configSettings.autoDenyLimit && estimation.estimatedCost >= configSettings.autoDenyLimit) {
         action = 'cancel';
+        telemetryLogger.emitEvent({ eventType: 'auto_denied', sessionId, requestId, metadata: { limit: configSettings.autoDenyLimit } });
       } else {
         // Fallback in headless mode: block if it requires approval but is outside auto-approve bounds
         action = 'cancel';
+        telemetryLogger.emitEvent({ eventType: 'auto_denied', sessionId, requestId, metadata: { reason: 'outside_auto_approve_bounds' } });
       }
     } else {
       // Interactive mode via Control Plane
@@ -159,10 +222,17 @@ async function handleInterception(
       });
       action = result.action;
       chosenModel = result.chosenModel;
+
+      if (action === 'cancel') {
+        telemetryLogger.emitEvent({ eventType: 'approval_denied', sessionId, requestId });
+      } else {
+        telemetryLogger.emitEvent({ eventType: 'approval_granted', sessionId, requestId, metadata: { action, chosenModel } });
+      }
     }
   }
 
   if (action === 'cancel') {
+    telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
     telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
     return reply.status(402).send({
       error: {
@@ -240,6 +310,7 @@ async function handleInterception(
 
   // Forward payload to destination API
   let streamReconciled = false;
+  telemetryLogger.emitEvent({ eventType: 'provider_request_sent', sessionId, requestId, provider, model: finalRequest.model });
   try {
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -249,7 +320,9 @@ async function handleInterception(
 
     if (!response.ok) {
       const errorText = await response.text();
+      telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
       telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'failed');
+      telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
       streamReconciled = true;
       return reply.status(response.status).send(errorText);
     }
@@ -268,14 +341,19 @@ async function handleInterception(
       const totalCost = ((normalizedRes.usage.inputTokens / 1000000) * pricing.inputPerMillion) + 
                         ((normalizedRes.usage.outputTokens / 1000000) * pricing.outputPerMillion);
       
+      telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: normalizedRes.usage } });
+      telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
+      
       db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens);
       telemetryLogger.reconcileRequest(requestId, totalCost, 'success', 'reconciled');
+      telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost: totalCost } });
       streamReconciled = true;
       
       return reply.send(resBody);
     }
 
     // Streaming Response proxy
+    telemetryLogger.emitEvent({ eventType: 'provider_stream_started', sessionId, requestId, provider, model: finalRequest.model });
     reply.header('content-type', 'text/event-stream');
     reply.header('cache-control', 'no-cache');
     reply.header('connection', 'keep-alive');
@@ -306,6 +384,7 @@ async function handleInterception(
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
+              telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
               controller.close();
               break;
             }
@@ -313,7 +392,8 @@ async function handleInterception(
             const chunkText = decoder.decode(value, { stream: true });
             parser.feed(chunkText);
           }
-        } catch (err) {
+        } catch (err: any) {
+          telemetryLogger.emitEvent({ eventType: 'provider_stream_interrupted', sessionId, requestId, metadata: { error: err?.message } });
           controller.error(err);
         } finally {
           // Stream ended, cancelled, or errored: Reconcile!
@@ -324,12 +404,16 @@ async function handleInterception(
           const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) + 
                             ((outputAccumulated / 1000000) * pricing.outputPerMillion);
 
+          telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
+
           db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
           telemetryLogger.reconcileRequest(requestId, finalCost, 'success', 'reconciled');
+          telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost } });
           streamReconciled = true;
         }
       },
       cancel() {
+        telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
         reader.cancel();
       }
     });
@@ -338,7 +422,9 @@ async function handleInterception(
   } catch (error: any) {
     console.error('Error forwarding request:', error);
     if (!streamReconciled) {
+       telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error.message } });
        telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');
+       telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
     }
     return reply.status(500).send({ error: { message: error.message } });
   }

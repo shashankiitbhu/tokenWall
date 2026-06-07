@@ -42,6 +42,17 @@ export interface RequestLog {
   created_at: string;
 }
 
+export interface GovernanceEvent {
+  id: string;
+  event_type: string;
+  request_id: string | null;
+  session_id: string;
+  provider: string | null;
+  model: string | null;
+  metadata: string;
+  created_at: string;
+}
+
 export class DBManager {
   public db: Database.Database;
 
@@ -128,6 +139,17 @@ export class DBManager {
         FOREIGN KEY(request_id) REFERENCES requests(id),
         FOREIGN KEY(session_id) REFERENCES sessions(id)
       );
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        request_id TEXT,
+        session_id TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        metadata TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+      );
     `);
     this.runMigrations();
   }
@@ -144,6 +166,12 @@ export class DBManager {
     }
     try {
       this.db.exec("ALTER TABLE requests ADD COLUMN routing_action TEXT;");
+    } catch (e) {
+    }
+    try {
+      // Ensure index on events table for rapid queries
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);");
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_request ON events(request_id);");
     } catch (e) {
     }
   }
@@ -198,6 +226,10 @@ export class DBManager {
     return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session | undefined;
   }
 
+  getSessions(limit: number = 50): Session[] {
+    return this.db.prepare('SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?').all(limit) as Session[];
+  }
+
   getSessionSpend(sessionId: string): number {
     const res = this.db.prepare('SELECT SUM(cost) as total FROM requests WHERE session_id = ?').get(sessionId) as { total: number | null } | undefined;
     return res?.total || 0;
@@ -209,6 +241,21 @@ export class DBManager {
       INSERT INTO requests (id, session_id, provider, model, original_model, routing_action, input_tokens, output_tokens, cost, optimized_tokens_saved, status, state)
       VALUES (@id, @session_id, @provider, @model, @original_model, @routing_action, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status, @state)
     `).run(log);
+  }
+
+  logEvent(event: Omit<GovernanceEvent, 'created_at'>) {
+    this.db.prepare(`
+      INSERT INTO events (id, event_type, request_id, session_id, provider, model, metadata)
+      VALUES (@id, @event_type, @request_id, @session_id, @provider, @model, @metadata)
+    `).run(event);
+  }
+
+  getEventsForSession(sessionId: string): GovernanceEvent[] {
+    return this.db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC').all(sessionId) as GovernanceEvent[];
+  }
+
+  getEventsForRequest(requestId: string): GovernanceEvent[] {
+    return this.db.prepare('SELECT * FROM events WHERE request_id = ? ORDER BY created_at ASC').all(requestId) as GovernanceEvent[];
   }
 
   updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number) {

@@ -34,6 +34,16 @@ export interface RequestLog {
     state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled' | 'reconciled';
     created_at: string;
 }
+export interface GovernanceEvent {
+    id: string;
+    event_type: string;
+    request_id: string | null;
+    session_id: string;
+    provider: string | null;
+    model: string | null;
+    metadata: string;
+    created_at: string;
+}
 export declare class DBManager {
     db: Database.Database;
     constructor(dbPath?: string);
@@ -55,8 +65,12 @@ export declare class DBManager {
     resetBudgets(period: 'daily' | 'monthly'): void;
     createSession(id: string, projectId: string | null, sessionBudget: number | null): Session;
     getSession(id: string): Session | undefined;
+    getSessions(limit?: number): Session[];
     getSessionSpend(sessionId: string): number;
     logRequest(log: Omit<RequestLog, 'created_at'>): void;
+    logEvent(event: Omit<GovernanceEvent, 'created_at'>): void;
+    getEventsForSession(sessionId: string): GovernanceEvent[];
+    getEventsForRequest(requestId: string): GovernanceEvent[];
     updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number): void;
     updateRequestRouting(requestId: string, originalModel: string, routingAction: string): void;
     reserveBudget(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string, originalModel?: string | null, routingAction?: string | null): {

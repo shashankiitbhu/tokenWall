@@ -90,6 +90,17 @@ class DBManager {
         FOREIGN KEY(request_id) REFERENCES requests(id),
         FOREIGN KEY(session_id) REFERENCES sessions(id)
       );
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        request_id TEXT,
+        session_id TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        metadata TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+      );
     `);
         this.runMigrations();
     }
@@ -107,6 +118,13 @@ class DBManager {
         }
         try {
             this.db.exec("ALTER TABLE requests ADD COLUMN routing_action TEXT;");
+        }
+        catch (e) {
+        }
+        try {
+            // Ensure index on events table for rapid queries
+            this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);");
+            this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_request ON events(request_id);");
         }
         catch (e) {
         }
@@ -155,6 +173,9 @@ class DBManager {
     getSession(id) {
         return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id);
     }
+    getSessions(limit = 50) {
+        return this.db.prepare('SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?').all(limit);
+    }
     getSessionSpend(sessionId) {
         const res = this.db.prepare('SELECT SUM(cost) as total FROM requests WHERE session_id = ?').get(sessionId);
         return res?.total || 0;
@@ -165,6 +186,18 @@ class DBManager {
       INSERT INTO requests (id, session_id, provider, model, original_model, routing_action, input_tokens, output_tokens, cost, optimized_tokens_saved, status, state)
       VALUES (@id, @session_id, @provider, @model, @original_model, @routing_action, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status, @state)
     `).run(log);
+    }
+    logEvent(event) {
+        this.db.prepare(`
+      INSERT INTO events (id, event_type, request_id, session_id, provider, model, metadata)
+      VALUES (@id, @event_type, @request_id, @session_id, @provider, @model, @metadata)
+    `).run(event);
+    }
+    getEventsForSession(sessionId) {
+        return this.db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC').all(sessionId);
+    }
+    getEventsForRequest(requestId) {
+        return this.db.prepare('SELECT * FROM events WHERE request_id = ? ORDER BY created_at ASC').all(requestId);
     }
     updateRequestTokens(requestId, inputTokens, outputTokens) {
         this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, requestId);
