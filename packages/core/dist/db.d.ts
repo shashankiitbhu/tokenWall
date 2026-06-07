@@ -28,6 +28,8 @@ export interface RequestLog {
     output_tokens: number;
     cost: number;
     optimized_tokens_saved: number;
+    original_model?: string | null;
+    routing_action?: string | null;
     status: 'success' | 'failed' | 'blocked';
     state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled' | 'reconciled';
     created_at: string;
@@ -56,7 +58,8 @@ export declare class DBManager {
     getSessionSpend(sessionId: string): number;
     logRequest(log: Omit<RequestLog, 'created_at'>): void;
     updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number): void;
-    reserveBudget(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string): {
+    updateRequestRouting(requestId: string, originalModel: string, routingAction: string): void;
+    reserveBudget(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string, originalModel?: string | null, routingAction?: string | null): {
         allowed: boolean;
         reason?: string;
     };

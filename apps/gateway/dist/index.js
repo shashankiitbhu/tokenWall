@@ -32,21 +32,25 @@ const telemetryLogger = new telemetry_1.TelemetryLogger(db);
 const PORT = 1984;
 // Intercept OpenAI Chat Completions
 server.post('/v1/chat/completions', async (request, reply) => {
-    return handleInterception('openai', 'https://api.openai.com/v1/chat/completions', request, reply);
+    const url = process.env.OPENAI_UPSTREAM_URL || 'https://api.openai.com/v1/chat/completions';
+    return handleInterception('openai', url, request, reply);
 });
 // Intercept Anthropic Messages
 server.post('/v1/messages', async (request, reply) => {
-    return handleInterception('anthropic', 'https://api.anthropic.com/v1/messages', request, reply);
+    const url = process.env.ANTHROPIC_UPSTREAM_URL || 'https://api.anthropic.com/v1/messages';
+    return handleInterception('anthropic', url, request, reply);
 });
 // Intercept Gemini API
 server.post('/v1/models/*', async (request, reply) => {
     const modelUrl = request.url;
-    const targetUrl = `https://generativelanguage.googleapis.com${modelUrl}`;
+    const baseUrl = process.env.GEMINI_UPSTREAM_URL || 'https://generativelanguage.googleapis.com';
+    const targetUrl = `${baseUrl}${modelUrl}`;
     return handleInterception('gemini', targetUrl, request, reply);
 });
 server.post('/v1beta/models/*', async (request, reply) => {
     const modelUrl = request.url;
-    const targetUrl = `https://generativelanguage.googleapis.com${modelUrl}`;
+    const baseUrl = process.env.GEMINI_UPSTREAM_URL || 'https://generativelanguage.googleapis.com';
+    const targetUrl = `${baseUrl}${modelUrl}`;
     return handleInterception('gemini', targetUrl, request, reply);
 });
 async function handleInterception(provider, targetUrl, request, reply) {
@@ -62,7 +66,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Pre-flight validation
     const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
     const contextReport = contextAnalyzer.analyze(parsedRequest);
-    const routingRecommendation = modelRouter.recommendRoute(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
+    const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
     // Prompt Optimization (heuristic compression preview)
     const firstUserMsg = parsedRequest.messages.find(m => m.role === 'user');
     const optimization = firstUserMsg
@@ -99,13 +103,25 @@ async function handleInterception(provider, targetUrl, request, reply) {
     }
     // Determine if we show interactive warning
     let action = 'approve';
-    const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0;
+    let chosenModel = undefined;
+    const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0 || routingOptions.shouldRoute;
     if (needsWarning) {
         const configSettings = configManager.getConfig();
         const isHeadless = configSettings.headless || process.env.TOKENWALL_HEADLESS === 'true';
         if (isHeadless) {
             // Headless policy evaluation
-            if (configSettings.autoApproveLimit && estimation.estimatedCost <= configSettings.autoApproveLimit) {
+            if (routingOptions.shouldRoute && configSettings.routingPolicy?.autoSwitchBelowThreshold && estimation.estimatedCost < configSettings.routingPolicy.autoSwitchBelowThreshold) {
+                // Auto-switch to the cheapest alternative if below threshold
+                const sortedAlts = [...routingOptions.alternatives].sort((a, b) => a.estimatedCost - b.estimatedCost);
+                if (sortedAlts.length > 0) {
+                    action = 'switch_model';
+                    chosenModel = sortedAlts[0].model;
+                }
+                else {
+                    action = 'approve';
+                }
+            }
+            else if (configSettings.autoApproveLimit && estimation.estimatedCost <= configSettings.autoApproveLimit) {
                 action = 'approve';
             }
             else if (configSettings.autoDenyLimit && estimation.estimatedCost >= configSettings.autoDenyLimit) {
@@ -118,14 +134,17 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         else {
             // Interactive mode via Control Plane
-            action = await control_plane_js_1.controlPlane.requestApproval({
+            const result = await control_plane_js_1.controlPlane.requestApproval({
                 requestId,
                 projectId,
                 sessionId,
                 model: parsedRequest.model,
                 estimatedCost: estimation.estimatedCost,
-                warnings: contextReport.inefficiencies
+                warnings: contextReport.inefficiencies,
+                routingAlternatives: routingOptions.alternatives
             });
+            action = result.action;
+            chosenModel = result.chosenModel;
         }
     }
     if (action === 'cancel') {
@@ -170,7 +189,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
     }
     else if (action === 'switch_model') {
-        const recommendedModel = routingRecommendation.recommendedModel;
+        const recommendedModel = chosenModel || (routingOptions.alternatives.length > 0 ? routingOptions.alternatives[0].model : parsedRequest.model);
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
@@ -183,6 +202,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         finalRequest = { ...parsedRequest, model: recommendedModel };
         console.log(terminal_ui_1.c.green(`✔ Switched model to: ${recommendedModel}`));
+        db.updateRequestRouting(requestId, parsedRequest.model, 'switched_model');
     }
     // Mutate OpenAI Request to include stream_options if streaming
     if (provider === 'openai' && parsedRequest.stream) {

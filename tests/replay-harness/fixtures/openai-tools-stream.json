@@ -1,0 +1,15 @@
+{
+  "provider": "openai",
+  "name": "openai-tools-stream",
+  "model": "gpt-4-turbo",
+  "expectedInputTokens": 200,
+  "expectedOutputTokens": 35,
+  "events": [
+    { "delayMs": 20, "chunk": "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"get_weather\"}}]}}]}\n\n" },
+    { "delayMs": 50, "chunk": "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"lo\"}}]}}]}\n\n" },
+    { "delayMs": 10, "chunk": "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"cation\\\":\\\"SF\\\"}\"}}]}}]}\n\n" },
+    { "delayMs": 5, "chunk": "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" },
+    { "delayMs": 10, "chunk": "data: {\"id\":\"chatcmpl-123\",\"choices\":[],\"usage\":{\"prompt_tokens\":200,\"completion_tokens\":35}}\n\n" },
+    { "delayMs": 5, "chunk": "data: [DONE]\n\n" }
+  ]
+}

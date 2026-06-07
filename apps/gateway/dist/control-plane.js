@@ -20,10 +20,10 @@ class ControlPlane {
                 try {
                     const data = JSON.parse(message.toString());
                     if (data.type === 'approval_resolved') {
-                        const { requestId, action } = data.payload;
+                        const { requestId, action, chosenModel } = data.payload;
                         const pending = this.pendingApprovals.get(requestId);
                         if (pending) {
-                            pending.resolve(action);
+                            pending.resolve({ action, chosenModel });
                             this.pendingApprovals.delete(requestId);
                             // Broadcast resolution to other clients
                             this.broadcast({ type: 'approval_cleared', payload: { requestId } });

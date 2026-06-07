@@ -28,7 +28,12 @@ const DEFAULT_CONFIG = {
     autoOptimize: true,
     headless: false,
     autoApproveLimit: 0.10,
-    autoDenyLimit: 5.00
+    autoDenyLimit: 5.00,
+    routingPolicy: {
+        autoSwitchBelowThreshold: 0.10,
+        neverDowngradeReasoning: true,
+        budgetAwareRouting: false
+    }
 };
 class ConfigManager {
     configPath;

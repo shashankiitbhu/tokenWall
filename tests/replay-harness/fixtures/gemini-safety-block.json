@@ -1,0 +1,12 @@
+{
+  "provider": "gemini",
+  "name": "gemini-safety-block",
+  "model": "gemini-1.5-flash",
+  "expectedInputTokens": 10,
+  "expectedOutputTokens": 2,
+  "events": [
+    { "delayMs": 50, "chunk": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Sorry, \"}]}}]}\n\n" },
+    { "delayMs": 20, "chunk": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"I cannot\"}]}}], \"usageMetadata\": {\"promptTokenCount\": 10, \"candidatesTokenCount\": 2}}\n\n" },
+    { "delayMs": 10, "action": "disconnect" }
+  ]
+}

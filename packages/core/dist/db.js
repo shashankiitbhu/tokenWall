@@ -68,6 +68,8 @@ class DBManager {
         session_id TEXT,
         provider TEXT NOT NULL,
         model TEXT NOT NULL,
+        original_model TEXT,
+        routing_action TEXT,
         input_tokens INTEGER NOT NULL,
         output_tokens INTEGER NOT NULL,
         cost REAL NOT NULL,
@@ -97,6 +99,16 @@ class DBManager {
         }
         catch (e) {
             // Column might already exist
+        }
+        try {
+            this.db.exec("ALTER TABLE requests ADD COLUMN original_model TEXT;");
+        }
+        catch (e) {
+        }
+        try {
+            this.db.exec("ALTER TABLE requests ADD COLUMN routing_action TEXT;");
+        }
+        catch (e) {
         }
     }
     // Projects
@@ -150,14 +162,17 @@ class DBManager {
     // Requests
     logRequest(log) {
         this.db.prepare(`
-      INSERT INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, optimized_tokens_saved, status, state)
-      VALUES (@id, @session_id, @provider, @model, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status, @state)
+      INSERT INTO requests (id, session_id, provider, model, original_model, routing_action, input_tokens, output_tokens, cost, optimized_tokens_saved, status, state)
+      VALUES (@id, @session_id, @provider, @model, @original_model, @routing_action, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status, @state)
     `).run(log);
     }
     updateRequestTokens(requestId, inputTokens, outputTokens) {
         this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, requestId);
     }
-    reserveBudget(projectId, sessionId, requestId, estimatedCost, provider = 'unknown', model = 'unknown') {
+    updateRequestRouting(requestId, originalModel, routingAction) {
+        this.db.prepare('UPDATE requests SET original_model = ?, routing_action = ? WHERE id = ?').run(originalModel, routingAction, requestId);
+    }
+    reserveBudget(projectId, sessionId, requestId, estimatedCost, provider = 'unknown', model = 'unknown', originalModel = null, routingAction = null) {
         const txn = this.db.transaction(() => {
             let budgets = [];
             if (projectId) {
@@ -192,9 +207,9 @@ class DBManager {
                 }
             }
             this.db.prepare(`
-        INSERT INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, status, state)
-        VALUES (?, ?, ?, ?, 0, 0, 0, 'success', 'streaming')
-      `).run(requestId, sessionId, provider, model);
+        INSERT INTO requests (id, session_id, provider, model, original_model, routing_action, input_tokens, output_tokens, cost, status, state)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 'success', 'streaming')
+      `).run(requestId, sessionId, provider, model, originalModel, routingAction);
             const resId = Math.random().toString(36).substring(2, 11);
             this.db.prepare('INSERT INTO reservations (id, request_id, project_id, session_id, amount) VALUES (?, ?, ?, ?, ?)').run(resId, requestId, projectId, sessionId, estimatedCost);
             return { allowed: true };

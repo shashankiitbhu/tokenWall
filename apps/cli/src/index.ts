@@ -80,19 +80,51 @@ async function main() {
           if (req.warnings && req.warnings.length > 0) {
             console.log(cRed(`Warnings:\n - ${req.warnings.join('\n - ')}`));
           }
+
+          if (req.routingAlternatives && req.routingAlternatives.length > 0) {
+            console.log(cBold(cCyan('\nRouting Alternatives:')));
+            req.routingAlternatives.forEach((alt: any, idx: number) => {
+               console.log(`  [${idx + 1}] ${cBold(alt.model)}: $${alt.estimatedCost.toFixed(4)} (Quality: ${alt.qualityLevel}, Savings: ${alt.savingsPercentage}%)`);
+            });
+            console.log('');
+          }
           
-          rl.question(cBold('Action (y: Approve, n: Deny, o: Optimize): '), (answer: string) => {
-            const ans = answer.trim().toLowerCase();
-            let action = 'cancel';
-            if (ans === 'y' || ans === 'yes') action = 'approve';
-            if (ans === 'o') action = 'optimize';
-            
-            ws.send(JSON.stringify({
-              type: 'approval_resolved',
-              payload: { requestId: req.requestId, action }
-            }));
-            console.log(cGreen(`✔ Action '${action}' sent.\n`));
-          });
+          const askAction = () => {
+            rl.question(cBold('Action (y: Approve, n: Deny, o: Optimize, s: Switch Model): '), (answer: string) => {
+              const ans = answer.trim().toLowerCase();
+              let action = 'cancel';
+              if (ans === 'y' || ans === 'yes') action = 'approve';
+              if (ans === 'o') action = 'optimize';
+              if (ans === 's' || ans === 'switch') action = 'switch_model';
+
+              if (action === 'switch_model' && req.routingAlternatives && req.routingAlternatives.length > 0) {
+                 rl.question(cBold(`Select model [1-${req.routingAlternatives.length}] or type model name: `), (modelAns: string) => {
+                    const modelAnsTrimmed = modelAns.trim();
+                    let chosenModel = req.routingAlternatives[0].model;
+                    const parsedIdx = parseInt(modelAnsTrimmed, 10);
+                    if (!isNaN(parsedIdx) && parsedIdx >= 1 && parsedIdx <= req.routingAlternatives.length) {
+                       chosenModel = req.routingAlternatives[parsedIdx - 1].model;
+                    } else if (modelAnsTrimmed.length > 0) {
+                       chosenModel = modelAnsTrimmed;
+                    }
+                    
+                    ws.send(JSON.stringify({
+                      type: 'approval_resolved',
+                      payload: { requestId: req.requestId, action, chosenModel }
+                    }));
+                    console.log(cGreen(`✔ Action '${action}' sent (Model: ${chosenModel}).\n`));
+                 });
+                 return;
+              }
+              
+              ws.send(JSON.stringify({
+                type: 'approval_resolved',
+                payload: { requestId: req.requestId, action }
+              }));
+              console.log(cGreen(`✔ Action '${action}' sent.\n`));
+            });
+          };
+          askAction();
         } else if (msg.type === 'approval_cleared') {
           console.log(cGray(`\nℹ️ Request ${msg.payload.requestId} was handled by another client or timed out.`));
         }

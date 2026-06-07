@@ -1,15 +1,21 @@
 import { NormalizedRequest } from '@tokenwall/providers';
 export type TaskComplexity = 'low' | 'medium' | 'high';
+export interface RoutingAlternative {
+    model: string;
+    estimatedCost: number;
+    qualityLevel: 'High' | 'Medium-High' | 'Medium';
+    savingsPercentage: number;
+}
 export interface RouteRecommendation {
     complexity: TaskComplexity;
     shouldRoute: boolean;
-    recommendedModel: string;
+    originalModel: string;
     originalEstimatedCost: number;
-    newEstimatedCost: number;
-    savingsPercentage: number;
+    alternatives: RoutingAlternative[];
     explanation: string;
 }
 export declare class ModelRouter {
     classifyComplexity(req: NormalizedRequest): TaskComplexity;
-    recommendRoute(req: NormalizedRequest, inputTokens: number, expectedOutputTokens: number): RouteRecommendation;
+    private calcCost;
+    generateRoutingOptions(req: NormalizedRequest, inputTokens: number, expectedOutputTokens: number): RouteRecommendation;
 }

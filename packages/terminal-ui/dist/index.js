@@ -49,9 +49,10 @@ class TerminalUI {
             console.log(`  Potential context savings: ${exports.c.green(`~${contextReport.totalWasteTokens.toLocaleString()} tokens`)}`);
         }
         // Routing Recommendation
-        if (routing.shouldRoute) {
+        if (routing.shouldRoute && routing.alternatives.length > 0) {
             console.log('\n' + exports.c.bold(exports.c.green('Smart Model Routing Recommendation:')));
-            console.log(`  Recommendation: ${exports.c.bold(exports.c.green(routing.recommendedModel))} (Saves ${exports.c.green(`${routing.savingsPercentage}%`)} cost)`);
+            const bestAlternative = routing.alternatives[0];
+            console.log(`  Recommendation: ${exports.c.bold(exports.c.green(bestAlternative.model))} (Saves ${exports.c.green(`${bestAlternative.savingsPercentage}%`)} cost)`);
             console.log(`  Reason: ${exports.c.gray(routing.explanation)}`);
         }
         // Optimization Suggestion

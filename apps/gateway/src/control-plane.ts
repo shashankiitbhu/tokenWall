@@ -8,13 +8,14 @@ export interface ApprovalRequest {
   model: string;
   estimatedCost: number;
   warnings: any[];
+  routingAlternatives?: any[];
 }
 
 export class ControlPlane {
   private clients: Set<any> = new Set();
   private pendingApprovals: Map<string, {
     request: ApprovalRequest;
-    resolve: (action: 'approve' | 'optimize' | 'switch_model' | 'cancel') => void;
+    resolve: (result: { action: 'approve' | 'optimize' | 'switch_model' | 'cancel', chosenModel?: string }) => void;
   }> = new Map();
 
   registerWebsocket(fastify: FastifyInstance) {
@@ -35,10 +36,10 @@ export class ControlPlane {
         try {
           const data = JSON.parse(message.toString());
           if (data.type === 'approval_resolved') {
-            const { requestId, action } = data.payload;
+            const { requestId, action, chosenModel } = data.payload;
             const pending = this.pendingApprovals.get(requestId);
             if (pending) {
-              pending.resolve(action);
+              pending.resolve({ action, chosenModel });
               this.pendingApprovals.delete(requestId);
               // Broadcast resolution to other clients
               this.broadcast({ type: 'approval_cleared', payload: { requestId } });
@@ -55,7 +56,7 @@ export class ControlPlane {
     });
   }
 
-  requestApproval(request: ApprovalRequest): Promise<'approve' | 'optimize' | 'switch_model' | 'cancel'> {
+  requestApproval(request: ApprovalRequest): Promise<{ action: 'approve' | 'optimize' | 'switch_model' | 'cancel', chosenModel?: string }> {
     console.log('Requesting approval for', request.requestId);
     return new Promise((resolve) => {
       this.pendingApprovals.set(request.requestId, { request, resolve });

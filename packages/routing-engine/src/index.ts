@@ -1,15 +1,21 @@
 import { NormalizedRequest } from '@tokenwall/providers';
-import { countTokens, getPricingForModel } from '@tokenwall/estimators';
+import { countTokens, getPricingForModel, ModelPricing } from '@tokenwall/estimators';
 
 export type TaskComplexity = 'low' | 'medium' | 'high';
+
+export interface RoutingAlternative {
+  model: string;
+  estimatedCost: number;
+  qualityLevel: 'High' | 'Medium-High' | 'Medium';
+  savingsPercentage: number;
+}
 
 export interface RouteRecommendation {
   complexity: TaskComplexity;
   shouldRoute: boolean;
-  recommendedModel: string;
+  originalModel: string;
   originalEstimatedCost: number;
-  newEstimatedCost: number;
-  savingsPercentage: number;
+  alternatives: RoutingAlternative[];
   explanation: string;
 }
 
@@ -24,6 +30,27 @@ const HIGH_COMPLEXITY_KEYWORDS = [
   /\brace condition\b/i, /\bsecurity vulnerability\b/i, /\bperformance tuning\b/i,
   /\boptimize query\b/i, /\bexplain how this entire repository\b/i, /\bdeeply reason\b/i
 ];
+
+const MODEL_QUALITY_MAP: Record<string, 'High' | 'Medium-High' | 'Medium'> = {
+  'gpt-4o': 'High',
+  'gpt-4-turbo': 'High',
+  'claude-3-opus': 'High',
+  'claude-3-5-sonnet': 'Medium-High',
+  'claude-3-5-sonnet-20241022': 'Medium-High',
+  'gemini-1.5-pro': 'Medium-High',
+  'gpt-4o-mini': 'Medium',
+  'claude-3-5-haiku': 'Medium',
+  'claude-3-haiku': 'Medium',
+  'gemini-1.5-flash': 'Medium',
+  'gemini-2.0-flash': 'Medium'
+};
+
+function getQualityLevel(model: string): 'High' | 'Medium-High' | 'Medium' {
+  for (const key of Object.keys(MODEL_QUALITY_MAP)) {
+    if (model.includes(key)) return MODEL_QUALITY_MAP[key];
+  }
+  return 'Medium'; // default fallback
+}
 
 export class ModelRouter {
   classifyComplexity(req: NormalizedRequest): TaskComplexity {
@@ -52,55 +79,63 @@ export class ModelRouter {
     return 'medium';
   }
 
-  recommendRoute(req: NormalizedRequest, inputTokens: number, expectedOutputTokens: number): RouteRecommendation {
+  private calcCost(inputTokens: number, expectedOutputTokens: number, pricing: ModelPricing): number {
+    return ((inputTokens / 1000000) * pricing.inputPerMillion) + 
+           ((expectedOutputTokens / 1000000) * pricing.outputPerMillion);
+  }
+
+  generateRoutingOptions(req: NormalizedRequest, inputTokens: number, expectedOutputTokens: number): RouteRecommendation {
     const complexity = this.classifyComplexity(req);
     const currentModel = req.model;
     const currentPricing = getPricingForModel(currentModel);
     
-    const originalCost = ((inputTokens / 1000000) * currentPricing.inputPerMillion) + 
-                          ((expectedOutputTokens / 1000000) * currentPricing.outputPerMillion);
-
-    let recommendedModel = currentModel;
+    const originalCost = this.calcCost(inputTokens, expectedOutputTokens, currentPricing);
+    
+    const alternatives: RoutingAlternative[] = [];
     let explanation = 'Your selected model is appropriate for this task.';
     let shouldRoute = false;
 
-    // Check if we can route to a cheaper model
-    const isPremiumModel = currentModel.includes('opus') || 
-                           currentModel.includes('sonnet') || 
-                           currentModel.includes('gpt-4o') || 
-                           currentModel.includes('pro');
-
-    if (isPremiumModel && complexity === 'low') {
-      shouldRoute = true;
-      if (currentModel.includes('claude')) {
-        recommendedModel = 'claude-3-5-haiku';
-        explanation = 'Low complexity task detected. Switched Claude Sonnet to Haiku to save cost.';
-      } else if (currentModel.includes('gpt')) {
-        recommendedModel = 'gpt-4o-mini';
-        explanation = 'Low complexity task detected. Switched GPT-4o to GPT-4o-mini to save cost.';
-      } else if (currentModel.includes('gemini')) {
-        recommendedModel = 'gemini-1.5-flash';
-        explanation = 'Low complexity task detected. Switched Gemini Pro to Gemini Flash to save cost.';
-      }
-    } else if (currentModel.includes('opus') && complexity === 'medium') {
-      shouldRoute = true;
-      recommendedModel = 'claude-3-5-sonnet';
-      explanation = 'Medium complexity task. Switched Claude Opus to Claude Sonnet (equivalent coding skills, 80% cheaper).';
+    // Build curated list of alternatives depending on provider to not confuse user
+    const ecosystem = currentModel.includes('claude') ? 'anthropic' : (currentModel.includes('gemini') ? 'gemini' : 'openai');
+    
+    let candidateModels: string[] = [];
+    if (ecosystem === 'anthropic') {
+      candidateModels = ['claude-3-opus', 'claude-3-5-sonnet', 'claude-3-5-haiku'];
+    } else if (ecosystem === 'gemini') {
+      candidateModels = ['gemini-1.5-pro', 'gemini-1.5-flash'];
+    } else {
+      candidateModels = ['gpt-4o', 'gpt-4o-mini'];
     }
 
-    const recommendedPricing = getPricingForModel(recommendedModel);
-    const newCost = ((inputTokens / 1000000) * recommendedPricing.inputPerMillion) + 
-                    ((expectedOutputTokens / 1000000) * recommendedPricing.outputPerMillion);
+    for (const altModel of candidateModels) {
+       const pricing = getPricingForModel(altModel);
+       const cost = this.calcCost(inputTokens, expectedOutputTokens, pricing);
+       const savingsPercentage = originalCost > 0 ? Math.round(((originalCost - cost) / originalCost) * 100) : 0;
+       
+       alternatives.push({
+         model: altModel,
+         estimatedCost: cost,
+         qualityLevel: getQualityLevel(altModel),
+         savingsPercentage
+       });
+    }
 
-    const savingsPercentage = originalCost > 0 ? Math.round(((originalCost - newCost) / originalCost) * 100) : 0;
+    // Determine if we should actively route
+    const currentQuality = getQualityLevel(currentModel);
+    if (currentQuality === 'High' && complexity === 'low') {
+      shouldRoute = true;
+      explanation = `Low complexity task detected. Consider switching from ${currentModel} to a cheaper alternative to save cost.`;
+    } else if (currentModel.includes('opus') && complexity === 'medium') {
+      shouldRoute = true;
+      explanation = `Medium complexity task. Claude Sonnet offers equivalent coding skills for 80% less cost.`;
+    }
 
     return {
       complexity,
       shouldRoute,
-      recommendedModel,
+      originalModel: currentModel,
       originalEstimatedCost: originalCost,
-      newEstimatedCost: newCost,
-      savingsPercentage,
+      alternatives,
       explanation
     };
   }

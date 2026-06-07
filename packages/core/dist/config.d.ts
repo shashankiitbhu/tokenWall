@@ -12,6 +12,11 @@ export interface TokenWallConfig {
     headless?: boolean;
     autoApproveLimit?: number;
     autoDenyLimit?: number;
+    routingPolicy?: {
+        autoSwitchBelowThreshold?: number;
+        neverDowngradeReasoning?: boolean;
+        budgetAwareRouting?: boolean;
+    };
 }
 export declare class ConfigManager {
     private configPath;

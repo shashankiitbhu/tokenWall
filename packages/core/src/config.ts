@@ -13,6 +13,11 @@ export interface TokenWallConfig {
   headless?: boolean;
   autoApproveLimit?: number;
   autoDenyLimit?: number;
+  routingPolicy?: {
+    autoSwitchBelowThreshold?: number;
+    neverDowngradeReasoning?: boolean;
+    budgetAwareRouting?: boolean;
+  };
 }
 
 const DEFAULT_CONFIG: TokenWallConfig = {
@@ -36,7 +41,12 @@ const DEFAULT_CONFIG: TokenWallConfig = {
   autoOptimize: true,
   headless: false,
   autoApproveLimit: 0.10,
-  autoDenyLimit: 5.00
+  autoDenyLimit: 5.00,
+  routingPolicy: {
+    autoSwitchBelowThreshold: 0.10,
+    neverDowngradeReasoning: true,
+    budgetAwareRouting: false
+  }
 };
 
 export class ConfigManager {

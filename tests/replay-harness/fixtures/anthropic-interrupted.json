@@ -1,0 +1,14 @@
+{
+  "provider": "anthropic",
+  "name": "anthropic-interrupted",
+  "model": "claude-3-5-sonnet",
+  "expectedInputTokens": 150,
+  "expectedOutputTokens": 45,
+  "events": [
+    { "delayMs": 50, "chunk": "data: {\"type\": \"message_start\", \"message\": {\"usage\": {\"input_tokens\": 150}}}\n\n" },
+    { "delayMs": 10, "chunk": "data: {\"type\": \"content_block_delta\", \"delta\": {\"type\": \"text_delta\", \"text\": \"This is \"}}\n\n" },
+    { "delayMs": 10, "chunk": "data: {\"type\": \"content_block_delta\", \"delta\": {\"type\": \"text_delta\", \"text\": \"a partial \"}}\n\n" },
+    { "delayMs": 10, "chunk": "data: {\"type\": \"message_delta\", \"usage\": {\"output_tokens\": 45}}\n\n" },
+    { "delayMs": 100, "action": "disconnect" }
+  ]
+}

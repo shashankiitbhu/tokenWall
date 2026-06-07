@@ -66,9 +66,10 @@ export class TerminalUI {
     }
 
     // Routing Recommendation
-    if (routing.shouldRoute) {
+    if (routing.shouldRoute && routing.alternatives.length > 0) {
       console.log('\n' + c.bold(c.green('Smart Model Routing Recommendation:')));
-      console.log(`  Recommendation: ${c.bold(c.green(routing.recommendedModel))} (Saves ${c.green(`${routing.savingsPercentage}%`)} cost)`);
+      const bestAlternative = routing.alternatives[0];
+      console.log(`  Recommendation: ${c.bold(c.green(bestAlternative.model))} (Saves ${c.green(`${bestAlternative.savingsPercentage}%`)} cost)`);
       console.log(`  Reason: ${c.gray(routing.explanation)}`);
     }
 
