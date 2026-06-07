@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="tokenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#0284C7"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  
+  <!-- Background Disc -->
+  <rect width="256" height="256" rx="54" fill="#0F172A" />
+
+  <!-- Grid of Tokens (Background) -->
+  <g opacity="0.3" fill="url(#tokenGrad)">
+    <rect x="48" y="48" width="32" height="32" rx="8" />
+    <rect x="112" y="48" width="32" height="32" rx="8" />
+    <rect x="176" y="48" width="32" height="32" rx="8" />
+    
+    <rect x="48" y="112" width="32" height="32" rx="8" />
+    <rect x="176" y="112" width="32" height="32" rx="8" />
+    
+    <rect x="48" y="176" width="32" height="32" rx="8" />
+    <rect x="112" y="176" width="32" height="32" rx="8" />
+    <rect x="176" y="176" width="32" height="32" rx="8" />
+  </g>
+
+  <!-- Central Shield (Wall) -->
+  <path d="M128 40 L64 68 V118.6 C64 165.6 91.5 208.8 128 232 C164.5 208.8 192 165.6 192 118.6 V68 L128 40 Z" 
+        fill="url(#shieldGrad)" 
+        filter="url(#shadow)"/>
+        
+  <!-- Central Icon (T or Check) -->
+  <path d="M96 128 L120 152 L160 104" 
+        stroke="#FFFFFF" 
+        stroke-width="18" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        fill="none" />
+</svg>

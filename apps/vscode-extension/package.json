@@ -4,11 +4,33 @@
   "description": "Seamless editor-native AI spend prevention and budget governance for coding agents",
   "version": "1.0.0",
   "publisher": "tokenwall",
+  "icon": "icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tokenwall/tokenwall.git"
+  },
+  "keywords": [
+    "AI",
+    "LLM",
+    "budget",
+    "tokens",
+    "spend",
+    "claude"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
+    "Machine Learning",
     "Other"
+  ],
+  "files": [
+    "dist",
+    "icon.png",
+    "package.json",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "activationEvents": [
     "*"
