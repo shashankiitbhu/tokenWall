@@ -1,0 +1,88 @@
+{
+  "name": "tokenwall-vscode",
+  "displayName": "TokenWall",
+  "description": "Seamless editor-native AI spend prevention and budget governance for coding agents",
+  "version": "1.0.0",
+  "publisher": "tokenwall",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "TokenWall",
+      "properties": {
+        "tokenwall.enableAutoInterception": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically route all VS Code integrated terminal AI requests through the TokenWall proxy."
+        },
+        "tokenwall.dailyLimit": {
+          "type": "number",
+          "default": 10.0,
+          "description": "Daily budget limit in USD."
+        },
+        "tokenwall.monthlyLimit": {
+          "type": "number",
+          "default": 100.0,
+          "description": "Monthly budget limit in USD."
+        },
+        "tokenwall.sessionLimit": {
+          "type": "number",
+          "default": 2.0,
+          "description": "Per-session budget limit in USD."
+        },
+        "tokenwall.hardLimitsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block requests immediately when budget limits are exceeded."
+        },
+        "tokenwall.autoApproveLimit": {
+          "type": "number",
+          "default": 0.10,
+          "description": "Auto-approve requests costing less than this amount in USD."
+        },
+        "tokenwall.autoDenyLimit": {
+          "type": "number",
+          "default": 5.00,
+          "description": "Auto-deny requests costing more than this amount in USD."
+        },
+        "tokenwall.autoOptimize": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically apply prompt optimization to reduce token bloat."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "tokenwall.showStatus",
+        "title": "TokenWall: Show Status Summary"
+      },
+      {
+        "command": "tokenwall.restartDaemon",
+        "title": "TokenWall: Restart Local Gateway Daemon"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.42",
+    "@types/vscode": "^1.75.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

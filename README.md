@@ -369,11 +369,28 @@ TokenWall intercepts Gemini requests sent via standard Google AI SDKs:
 ```bash
 npx tokenwall exec -- gemini-cli "Explain this codebase"
 ```
-It intercepts `/v1/models/*` and `/v1beta/models/*`, parses Gemini's candidate parts schemas, and supports streaming responses.
+It intercepts `/v1/models/*` and `/v1beta/models/*`, parses Gemini's candidate parts schemas, and supports streaming res---
+
+## 20. VS Code Companion Extension
+
+TokenWall offers a seamless, editor-native companion extension ([package.json](file:///Users/shashankkumar/Documents/tokenWall/apps/vscode-extension/package.json)) to automate the local governance workflow:
+
+- **Automatic Interception**: Uses VS Code's `EnvironmentVariableCollection` to inject proxy base URLs into all integrated terminals. Running `claude` or other agents in VS Code integrated terminals routes traffic through TokenWall automatically, without needing `tokenwall exec` wrappers.
+- **Native Modal Approvals**: If a query is costly or risky, the extension catches the WebSocket request and displays a native VS Code warning dialog box (`{ modal: true }`). You can choose `Approve`, `Optimize Prompt`, `Switch Model`, or `Cancel` with a click.
+- **Daemon Lifecycle Management**: Verifies health on port `1984` and automatically spawns the proxy server (`npx tokenwall start`) in the background if it is offline.
+- **Spend Tracking**: Displays your current daily spend in the status bar (e.g. `$(shield) TokenWall: $0.12`).
+
+### Installation
+1. Pack the extension locally:
+   ```bash
+   cd apps/vscode-extension
+   npx vsce package
+   ```
+2. Install the `.vsix` file in VS Code (`Extensions: Install from VSIX...`).
 
 ---
 
-## 20. Example Workflows
+## 21. Example Workflows
 
 ### Scenario A: Runaway Loop Intercepted
 
@@ -397,7 +414,7 @@ Reason: Duplicate prompt footprint detected. Multiple sequential requests have t
 
 ---
 
-## 21. Security & Privacy Model
+## 22. Security & Privacy Model
 
 - **100% Local Processing**: All request bodies, logs, keys, and code files stay on your local disk.
 - **No Prompt Storage**: To protect sensitive codebases and keys, TokenWall **never logs prompt contents or responses** to the database. It only stores metadata: model name, token counts, calculated costs, and structural hashes.
@@ -405,7 +422,7 @@ Reason: Duplicate prompt footprint detected. Multiple sequential requests have t
 
 ---
 
-## 22. Current Limitations
+## 23. Current Limitations
 
 - **Experimental Gemini Parsing**: Some complex Gemini structures (e.g. multi-turn chats with system instructions) are still in development and might fall back to token approximations.
 - **Provider Base URL Overrides**: The target coding tool must respect base URL environment variables (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `GEMINI_BASE_URL`). Tools with hardcoded URLs bypass interception.
@@ -413,7 +430,7 @@ Reason: Duplicate prompt footprint detected. Multiple sequential requests have t
 
 ---
 
-## 23. Troubleshooting
+## 24. Troubleshooting
 
 ### Gateway fails to bind to port 1984
 Another process is running on port 1984. Kill it:
@@ -436,7 +453,7 @@ npx tokenwall exec -- env | grep _BASE_URL
 
 ---
 
-## 24. Local Database Location
+## 25. Local Database Location
 
 The sqlite store is located at:
 ```
@@ -454,7 +471,7 @@ Configuration resides at:
 
 ---
 
-## 25. Contributing Guide
+## 26. Contributing Guide
 
 1. Fork the repository.
 2. Create a feature branch: `git checkout -b feature/my-cool-idea`
@@ -467,6 +484,6 @@ Configuration resides at:
 
 ---
 
-## 26. License
+## 27. License
 
 This project is licensed under the MIT License. See [LICENSE](file:///Users/shashankkumar/Documents/tokenWall/LICENSE) for details.
