@@ -9,6 +9,9 @@ export interface TokenWallConfig {
         inputPrice: number;
         outputPrice: number;
     }>;
+    headless?: boolean;
+    autoApproveLimit?: number;
+    autoDenyLimit?: number;
 }
 export declare class ConfigManager {
     private configPath;

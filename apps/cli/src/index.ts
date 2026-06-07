@@ -15,7 +15,9 @@ function showHelp() {
 ${cBold(cGreen('TokenWall'))} - AI Spend Prevention & Budget Governance Platform
 
 ${cBold('Usage:')}
-  tokenwall start                 Start the standalone interception gateway
+  tokenwall start [--headless]    Start the standalone interception gateway
+  tokenwall approve               Connect to control plane to approve requests
+  tokenwall exec -- <command>     Run an agent command wrapped with budget interception
   tokenwall exec -- <command>     Run an agent command wrapped with budget interception
   tokenwall status                Show current budget usage and statistics
   tokenwall config <key>=<value>  Update local configuration limits
@@ -30,6 +32,7 @@ ${cBold('Examples:')}
 function cBold(text: string) { return `\x1b[1m${text}\x1b[22m`; }
 function cGreen(text: string) { return `\x1b[32m${text}\x1b[39m`; }
 function cYellow(text: string) { return `\x1b[33m${text}\x1b[39m`; }
+function cBlue(text: string) { return `\x1b[34m${text}\x1b[39m`; }
 function cCyan(text: string) { return `\x1b[36m${text}\x1b[39m`; }
 function cRed(text: string) { return `\x1b[31m${text}\x1b[39m`; }
 function cGray(text: string) { return `\x1b[90m${text}\x1b[39m`; }
@@ -41,12 +44,73 @@ async function main() {
   }
 
   if (command === 'start') {
+    const isHeadless = args.includes('--headless');
     console.log(cBold(cCyan('Starting TokenWall gateway...')));
     // Launch gateway server in-process by executing the gateway file
     const gatewayPath = path.resolve(__dirname, '../../gateway/dist/index.js');
-    const gatewayProc = spawn('node', [gatewayPath], { stdio: 'inherit' });
+    const gatewayProc = spawn('node', [gatewayPath], { 
+      stdio: 'inherit',
+      env: { ...process.env, TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }
+    });
     gatewayProc.on('exit', (code) => {
       process.exit(code || 0);
+    });
+    return;
+  }
+
+  if (command === 'approve') {
+    console.log(cBold(cBlue('🔗 Connecting to TokenWall Control Plane...')));
+    const WebSocket = require('ws');
+    const ws = new WebSocket('ws://127.0.0.1:1984/ws/control');
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+    ws.on('open', () => {
+      console.log(cGreen('✔ Connected. Waiting for approval requests...\n'));
+    });
+
+    ws.on('message', (data: any) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === 'approval_pending') {
+          const req = msg.payload;
+          console.log(cBold(cYellow(`\n⚠️  APPROVAL REQUIRED [${req.requestId}]`)));
+          console.log(`Model: ${req.model}`);
+          console.log(`Estimated Cost: $${req.estimatedCost.toFixed(4)}`);
+          if (req.warnings && req.warnings.length > 0) {
+            console.log(cRed(`Warnings:\n - ${req.warnings.join('\n - ')}`));
+          }
+          
+          rl.question(cBold('Action (y: Approve, n: Deny, o: Optimize): '), (answer: string) => {
+            const ans = answer.trim().toLowerCase();
+            let action = 'cancel';
+            if (ans === 'y' || ans === 'yes') action = 'approve';
+            if (ans === 'o') action = 'optimize';
+            
+            ws.send(JSON.stringify({
+              type: 'approval_resolved',
+              payload: { requestId: req.requestId, action }
+            }));
+            console.log(cGreen(`✔ Action '${action}' sent.\n`));
+          });
+        } else if (msg.type === 'approval_cleared') {
+          console.log(cGray(`\nℹ️ Request ${msg.payload.requestId} was handled by another client or timed out.`));
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    ws.on('close', () => {
+      console.log(cRed('❌ Connection closed.'));
+      rl.close();
+      process.exit(1);
+    });
+    
+    ws.on('error', (err: any) => {
+      console.error(cRed('❌ WebSocket error:'), err.message);
+      rl.close();
+      process.exit(1);
     });
     return;
   }
@@ -66,10 +130,11 @@ async function main() {
     console.log(cBold(cGreen('Initializing TokenWall Interception Wrapper...')));
 
     // 1. Spin up the gateway server locally in the background
+    const isHeadless = args.includes('--headless');
     const gatewayPath = path.resolve(__dirname, '../../gateway/dist/index.js');
     const gatewayServer = spawn('node', [gatewayPath], {
       stdio: 'ignore', // Do not inherit stdio, prevent TTY collisions
-      env: { ...process.env, PORT: '1984' }
+      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }
     });
 
     // Wait a brief moment for the gateway to boot on port 1984

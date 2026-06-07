@@ -8,6 +8,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@fastify/websocket": "^8.3.1",
     "@tokenwall/budget-engine": "file:../../packages/budget-engine",
     "@tokenwall/context-engine": "file:../../packages/context-engine",
     "@tokenwall/core": "file:../../packages/core",

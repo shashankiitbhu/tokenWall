@@ -14,7 +14,13 @@ const prompt_optimizer_1 = require("@tokenwall/prompt-optimizer");
 const telemetry_1 = require("@tokenwall/telemetry");
 const terminal_ui_1 = require("@tokenwall/terminal-ui");
 const eventsource_parser_1 = require("eventsource-parser");
+const websocket_1 = __importDefault(require("@fastify/websocket"));
+const control_plane_js_1 = require("./control-plane.js");
 const server = (0, fastify_1.default)({ logger: false });
+server.register(websocket_1.default);
+server.register(async function (f) {
+    control_plane_js_1.controlPlane.registerWebsocket(f);
+});
 const db = new core_1.DBManager();
 const configManager = new core_1.ConfigManager();
 const budgetEvaluator = new budget_engine_1.BudgetEvaluator(db, configManager);
@@ -95,7 +101,32 @@ async function handleInterception(provider, targetUrl, request, reply) {
     let action = 'approve';
     const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0;
     if (needsWarning) {
-        action = await terminal_ui_1.TerminalUI.askApproval(estimation.estimatedCost.toFixed(4), parsedRequest.model);
+        const configSettings = configManager.getConfig();
+        const isHeadless = configSettings.headless || process.env.TOKENWALL_HEADLESS === 'true';
+        if (isHeadless) {
+            // Headless policy evaluation
+            if (configSettings.autoApproveLimit && estimation.estimatedCost <= configSettings.autoApproveLimit) {
+                action = 'approve';
+            }
+            else if (configSettings.autoDenyLimit && estimation.estimatedCost >= configSettings.autoDenyLimit) {
+                action = 'cancel';
+            }
+            else {
+                // Fallback in headless mode: block if it requires approval but is outside auto-approve bounds
+                action = 'cancel';
+            }
+        }
+        else {
+            // Interactive mode via Control Plane
+            action = await control_plane_js_1.controlPlane.requestApproval({
+                requestId,
+                projectId,
+                sessionId,
+                model: parsedRequest.model,
+                estimatedCost: estimation.estimatedCost,
+                warnings: contextReport.inefficiencies
+            });
+        }
     }
     if (action === 'cancel') {
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');

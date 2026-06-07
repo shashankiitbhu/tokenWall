@@ -9,8 +9,14 @@ import { PromptOptimizer } from '@tokenwall/prompt-optimizer';
 import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
+import fastifyWebsocket from '@fastify/websocket';
+import { controlPlane } from './control-plane.js';
 
 const server = fastify({ logger: false });
+server.register(fastifyWebsocket as any);
+server.register(async function (f) {
+  controlPlane.registerWebsocket(f);
+});
 
 const db = new DBManager();
 const configManager = new ConfigManager();
@@ -113,7 +119,29 @@ async function handleInterception(
   const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0;
   
   if (needsWarning) {
-    action = await TerminalUI.askApproval(estimation.estimatedCost.toFixed(4), parsedRequest.model);
+    const configSettings = configManager.getConfig();
+    const isHeadless = configSettings.headless || process.env.TOKENWALL_HEADLESS === 'true';
+    if (isHeadless) {
+      // Headless policy evaluation
+      if (configSettings.autoApproveLimit && estimation.estimatedCost <= configSettings.autoApproveLimit) {
+        action = 'approve';
+      } else if (configSettings.autoDenyLimit && estimation.estimatedCost >= configSettings.autoDenyLimit) {
+        action = 'cancel';
+      } else {
+        // Fallback in headless mode: block if it requires approval but is outside auto-approve bounds
+        action = 'cancel';
+      }
+    } else {
+      // Interactive mode via Control Plane
+      action = await controlPlane.requestApproval({
+        requestId,
+        projectId,
+        sessionId,
+        model: parsedRequest.model,
+        estimatedCost: estimation.estimatedCost,
+        warnings: contextReport.inefficiencies
+      });
+    }
   }
 
   if (action === 'cancel') {

@@ -74,13 +74,15 @@ export function calculatePreFlightEstimation(
   const inputTokens = estimateRequestTokens(req);
   
   // Predict expected output tokens
-  let expectedOutput = req.maxTokens || 1200;
-  if (history.length > 0) {
-    const avgOutput = history.reduce((sum, h) => sum + h.output, 0) / history.length;
-    expectedOutput = Math.min(expectedOutput, Math.ceil(avgOutput * 1.15));
-  } else {
-    // If agent prompt has tools, it will likely output compact tool calls, but loop
-    expectedOutput = req.toolsAttached ? 400 : 800;
+  let expectedOutput = req.maxTokens;
+  if (!expectedOutput) {
+    if (history.length > 0) {
+      const avgOutput = history.reduce((sum, h) => sum + h.output, 0) / history.length;
+      expectedOutput = Math.min(1200, Math.ceil(avgOutput * 1.15));
+    } else {
+      // If agent prompt has tools, it will likely output compact tool calls, but loop
+      expectedOutput = req.toolsAttached ? 400 : 800;
+    }
   }
 
   // Cost formula

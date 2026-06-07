@@ -25,7 +25,10 @@ const DEFAULT_CONFIG = {
         '**/*.png',
         '**/*.jpg'
     ],
-    autoOptimize: true
+    autoOptimize: true,
+    headless: false,
+    autoApproveLimit: 0.10,
+    autoDenyLimit: 5.00
 };
 class ConfigManager {
     configPath;

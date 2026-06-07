@@ -10,6 +10,9 @@ export interface TokenWallConfig {
   blacklistedPatterns: string[];
   autoOptimize: boolean;
   modelPricingOverrides?: Record<string, { inputPrice: number; outputPrice: number }>;
+  headless?: boolean;
+  autoApproveLimit?: number;
+  autoDenyLimit?: number;
 }
 
 const DEFAULT_CONFIG: TokenWallConfig = {
@@ -30,7 +33,10 @@ const DEFAULT_CONFIG: TokenWallConfig = {
     '**/*.png',
     '**/*.jpg'
   ],
-  autoOptimize: true
+  autoOptimize: true,
+  headless: false,
+  autoApproveLimit: 0.10,
+  autoDenyLimit: 5.00
 };
 
 export class ConfigManager {
