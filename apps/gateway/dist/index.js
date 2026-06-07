@@ -331,6 +331,8 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         let inputAccumulated = 0;
         let outputAccumulated = 0;
+        let streamFailed = false;
+        let streamCancelled = false;
         const decoder = new TextDecoder();
         const stream = new ReadableStream({
             async start(controller) {
@@ -338,11 +340,20 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 const parser = (0, eventsource_parser_1.createParser)({
                     onEvent: (event) => {
                         const parsedChunk = providers_1.ProviderRegistry.parseStreamChunk(provider, event.data);
-                        if (parsedChunk && parsedChunk.usage) {
-                            if (parsedChunk.usage.inputTokens > 0)
-                                inputAccumulated = parsedChunk.usage.inputTokens;
-                            if (parsedChunk.usage.outputTokens > 0)
-                                outputAccumulated = parsedChunk.usage.outputTokens;
+                        if (parsedChunk) {
+                            if (parsedChunk.text && parsedChunk.text.startsWith('[Tool Use:')) {
+                                console.log(`[Stream] [Tool Use] ${parsedChunk.text} detected for request ${requestId}`);
+                            }
+                            if (parsedChunk.usage) {
+                                if (parsedChunk.usage.inputTokens > 0) {
+                                    inputAccumulated = parsedChunk.usage.inputTokens;
+                                    console.log(`[Stream] [Input Usage] Intercepted message_start usage inputTokens=${inputAccumulated} for request ${requestId}`);
+                                }
+                                if (parsedChunk.usage.outputTokens > 0) {
+                                    outputAccumulated = parsedChunk.usage.outputTokens;
+                                    console.log(`[Stream] [Output Usage] Intercepted message_delta usage outputTokens=${outputAccumulated} for request ${requestId}`);
+                                }
+                            }
                         }
                     }
                 });
@@ -360,28 +371,41 @@ async function handleInterception(provider, targetUrl, request, reply) {
                     }
                 }
                 catch (err) {
+                    streamFailed = true;
                     telemetryLogger.emitEvent({ eventType: 'provider_stream_interrupted', sessionId, requestId, metadata: { error: err?.message } });
                     controller.error(err);
                 }
                 finally {
-                    // Stream ended, cancelled, or errored: Reconcile!
-                    if (inputAccumulated === 0)
-                        inputAccumulated = estimation.estimatedInputTokens;
-                    if (outputAccumulated === 0)
-                        outputAccumulated = estimation.estimatedOutputTokens; // fallback
-                    const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
-                    const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
-                        ((outputAccumulated / 1000000) * pricing.outputPerMillion);
-                    telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
-                    db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
-                    telemetryLogger.reconcileRequest(requestId, finalCost, 'success', 'reconciled');
-                    telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost } });
-                    streamReconciled = true;
+                    if (!streamReconciled) {
+                        if (inputAccumulated === 0)
+                            inputAccumulated = estimation.estimatedInputTokens;
+                        if (outputAccumulated === 0)
+                            outputAccumulated = estimation.estimatedOutputTokens; // fallback
+                        const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
+                        const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
+                            ((outputAccumulated / 1000000) * pricing.outputPerMillion);
+                        telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
+                        db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
+                        const status = streamFailed ? 'failed' : 'success';
+                        const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
+                        telemetryLogger.reconcileRequest(requestId, finalCost, status, state);
+                        telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state, finalCost } });
+                        console.log(`[Reconcile] Request ${requestId} resolved: state=${state}, cost=$${finalCost.toFixed(6)}, input=${inputAccumulated}, output=${outputAccumulated}`);
+                        streamReconciled = true;
+                    }
                 }
             },
             cancel() {
+                streamCancelled = true;
                 telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
                 reader.cancel();
+                if (!streamReconciled) {
+                    db.updateRequestTokens(requestId, inputAccumulated || estimation.estimatedInputTokens, outputAccumulated || 1);
+                    telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'cancelled');
+                    telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'cancelled' } });
+                    streamReconciled = true;
+                    console.log(`[Reconcile] Request ${requestId} cancelled mid-stream. Reservation reclaimed.`);
+                }
             }
         });
         return reply.send(stream);

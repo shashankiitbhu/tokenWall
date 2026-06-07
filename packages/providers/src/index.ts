@@ -164,17 +164,25 @@ export class ProviderRegistry {
         let usage: any;
 
         if (parsed.type === 'content_block_delta') {
-          text = parsed.delta?.text || '';
+          if (parsed.delta?.type === 'text_delta') {
+            text = parsed.delta?.text || '';
+          } else if (parsed.delta?.type === 'input_json_delta') {
+            text = parsed.delta?.partial_json || '';
+          }
         } else if (parsed.type === 'message_start') {
           usage = {
             inputTokens: parsed.message?.usage?.input_tokens || 0,
-            outputTokens: 0
+            outputTokens: parsed.message?.usage?.output_tokens || 0
           };
         } else if (parsed.type === 'message_delta') {
           usage = {
-            inputTokens: 0,
+            inputTokens: parsed.usage?.input_tokens || 0,
             outputTokens: parsed.usage?.output_tokens || 0
           };
+        } else if (parsed.type === 'content_block_start') {
+          if (parsed.content_block?.type === 'tool_use') {
+            text = `[Tool Use: ${parsed.content_block.name}]`;
+          }
         }
         return { text, usage };
       }
