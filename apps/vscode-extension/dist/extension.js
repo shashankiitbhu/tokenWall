@@ -285,7 +285,7 @@ function connectControlPlane(context) {
 async function handlePendingApproval(req) {
     const costText = `$${req.estimatedCost.toFixed(4)}`;
     const warningsList = req.warnings.length > 0
-        ? `\n\nWarnings:\n - ${req.warnings.join('\n - ')}`
+        ? `\n\nWarnings:\n - ${req.warnings.map((w) => typeof w === 'string' ? w : w.description).join('\n - ')}`
         : '';
     const alternativesAvailable = req.routingAlternatives && req.routingAlternatives.length > 0;
     const buttons = ['Approve'];

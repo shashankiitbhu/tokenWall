@@ -20,10 +20,31 @@ class ProviderRegistry {
             };
         }
         if (provider === 'anthropic') {
-            const messages = (body.messages || []).map((m) => ({
-                role: m.role || 'user',
-                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-            }));
+            const messages = (body.messages || []).map((m) => {
+                let contentStr = '';
+                if (typeof m.content === 'string') {
+                    contentStr = m.content;
+                }
+                else if (Array.isArray(m.content)) {
+                    contentStr = m.content
+                        .map((c) => {
+                        if (c.type === 'text')
+                            return c.text || '';
+                        if (c.type === 'tool_use')
+                            return `[Tool Use: ${c.name}]`;
+                        return '';
+                    })
+                        .filter(Boolean)
+                        .join('\n');
+                }
+                else {
+                    contentStr = JSON.stringify(m.content);
+                }
+                return {
+                    role: m.role || 'user',
+                    content: contentStr
+                };
+            });
             return {
                 provider: 'anthropic',
                 model: body.model || 'unknown',

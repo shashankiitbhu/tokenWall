@@ -287,7 +287,7 @@ interface PendingApprovalRequest {
 async function handlePendingApproval(req: PendingApprovalRequest) {
   const costText = `$${req.estimatedCost.toFixed(4)}`;
   const warningsList = req.warnings.length > 0 
-    ? `\n\nWarnings:\n - ${req.warnings.join('\n - ')}` 
+    ? `\n\nWarnings:\n - ${req.warnings.map((w: any) => typeof w === 'string' ? w : w.description).join('\n - ')}` 
     : '';
 
   const alternativesAvailable = req.routingAlternatives && req.routingAlternatives.length > 0;
