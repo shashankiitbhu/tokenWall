@@ -2,7 +2,7 @@
 
 **TokenWall** is a seamless, editor-native AI spend prevention and budget governance tool for coding agents. It intercepts requests from popular AI coding extensions (like Claude Code, Cline, Roo Cline) directly from your terminal and provides intelligent proxying, prompt optimization, and budget limits.
 
-![TokenWall](icon.png)
+
 
 ## Features
 
@@ -31,7 +31,7 @@ TokenWall runs a lightweight local Gateway Daemon on port `1984`. The VS Code ex
 3. If it is safe, it performs context-analysis to compress your prompt.
 4. If it detects a loop, it safely halts the agent.
 
-For more details on the TokenWall ecosystem, check out the [GitHub Repository](https://github.com/tokenwall/tokenwall) (placeholder).
+
 
 ## Requirements
 - VS Code ^1.75.0
@@ -50,4 +50,4 @@ This extension contributes the following settings:
 
 ## License
 
-[MIT](LICENSE)
+MIT

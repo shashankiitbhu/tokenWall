@@ -10,13 +10,6 @@ const command = args[0];
 const db = new DBManager();
 const configManager = new ConfigManager();
 
-function getGatewayPath(): string {
-  try {
-    return require.resolve('@tokenwall/gateway');
-  } catch {
-    return path.resolve(__dirname, '../../gateway/dist/index.js');
-  }
-}
 
 function showHelp() {
   console.log(`
@@ -54,15 +47,8 @@ async function main() {
   if (command === 'start') {
     const isHeadless = args.includes('--headless');
     console.log(cBold(cCyan('Starting TokenWall gateway...')));
-    // Launch gateway server in-process by executing the gateway file
-    const gatewayPath = getGatewayPath();
-    const gatewayProc = spawn('node', [gatewayPath], { 
-      stdio: 'inherit',
-      env: { ...process.env, TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }
-    });
-    gatewayProc.on('exit', (code) => {
-      process.exit(code || 0);
-    });
+    process.env.TOKENWALL_HEADLESS = isHeadless ? 'true' : 'false';
+    require('@tokenwall/gateway');
     return;
   }
 
@@ -169,13 +155,10 @@ async function main() {
 
     console.log(cBold(cGreen('Initializing TokenWall Interception Wrapper...')));
 
-    // 1. Spin up the gateway server locally in the background
+    // 1. Start the gateway server locally in-process
     const isHeadless = args.includes('--headless');
-    const gatewayPath = getGatewayPath();
-    const gatewayServer = spawn('node', [gatewayPath], {
-      stdio: 'ignore', // Do not inherit stdio, prevent TTY collisions
-      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }
-    });
+    process.env.TOKENWALL_HEADLESS = isHeadless ? 'true' : 'false';
+    require('@tokenwall/gateway');
 
     // Wait a brief moment for the gateway to boot on port 1984
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -213,8 +196,6 @@ async function main() {
       console.log(`  Tokens Saved:       ${cGreen(summary.saved.toLocaleString())}`);
       console.log(cBold(cGreen('─'.repeat(50))));
 
-      // Kill the local gateway server
-      gatewayServer.kill();
       process.exit(code || 0);
     });
     return;

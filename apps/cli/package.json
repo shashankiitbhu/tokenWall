@@ -1,5 +1,5 @@
 {
-  "name": "@tokenwall/cli",
+  "name": "tokenwall",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,9 +8,12 @@
   },
   "scripts": {
     "start": "node dist/index.js",
-    "build": "tsc"
+    "build": "ncc build src/index.ts -o dist -m -e better-sqlite3"
   },
   "dependencies": {
+    "better-sqlite3": "^11.8.1"
+  },
+  "devDependencies": {
     "@tokenwall/core": "file:../../packages/core",
     "@tokenwall/gateway": "file:../gateway"
   }

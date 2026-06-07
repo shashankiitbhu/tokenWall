@@ -2,14 +2,10 @@
   "name": "tokenwall-vscode",
   "displayName": "TokenWall",
   "description": "Seamless editor-native AI spend prevention and budget governance for coding agents",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "tokenwall",
   "icon": "icon.png",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/tokenwall/tokenwall.git"
-  },
   "keywords": [
     "AI",
     "LLM",
@@ -24,13 +20,6 @@
   "categories": [
     "Machine Learning",
     "Other"
-  ],
-  "files": [
-    "dist",
-    "icon.png",
-    "package.json",
-    "README.md",
-    "CHANGELOG.md"
   ],
   "activationEvents": [
     "*"
@@ -47,17 +36,17 @@
         },
         "tokenwall.dailyLimit": {
           "type": "number",
-          "default": 10.0,
+          "default": 10,
           "description": "Daily budget limit in USD."
         },
         "tokenwall.monthlyLimit": {
           "type": "number",
-          "default": 100.0,
+          "default": 100,
           "description": "Monthly budget limit in USD."
         },
         "tokenwall.sessionLimit": {
           "type": "number",
-          "default": 2.0,
+          "default": 2,
           "description": "Per-session budget limit in USD."
         },
         "tokenwall.hardLimitsEnabled": {
@@ -67,12 +56,12 @@
         },
         "tokenwall.autoApproveLimit": {
           "type": "number",
-          "default": 0.10,
+          "default": 0.1,
           "description": "Auto-approve requests costing less than this amount in USD."
         },
         "tokenwall.autoDenyLimit": {
           "type": "number",
-          "default": 5.00,
+          "default": 5,
           "description": "Auto-deny requests costing more than this amount in USD."
         },
         "tokenwall.autoOptimize": {
@@ -95,16 +84,16 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "ncc build src/extension.ts -o dist -m && mv dist/index.js dist/extension.js",
+    "watch": "ncc build src/extension.ts -o dist -w"
   },
   "devDependencies": {
     "@types/node": "^20.19.42",
     "@types/vscode": "^1.75.0",
     "@types/ws": "^8.5.10",
-    "typescript": "^5.9.3"
-  },
-  "dependencies": {
+    "esbuild": "^0.28.0",
+    "typescript": "^5.9.3",
     "ws": "^8.16.0"
-  }
+  },
+  "dependencies": {}
 }

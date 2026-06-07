@@ -1,7 +1,6 @@
 .vscode/**
 .vscode-test/**
 out/**
-node_modules/**
 src/**
 .gitignore
 .yarnrc
@@ -9,3 +8,5 @@ src/**
 **/*.map
 tsconfig.json
 vsc-extension-quickstart.md
+icon.svg
+node_modules/@tokenwall/**

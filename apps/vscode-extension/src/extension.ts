@@ -179,7 +179,7 @@ function launchDaemon(context: vscode.ExtensionContext) {
     });
   } else {
     // Fallback: spawn npx global launch
-    daemonProcess = spawn('npx', ['tokenwall', 'start'], {
+    daemonProcess = spawn('npx', ['--yes', 'tokenwall', 'start'], {
       stdio: 'ignore',
       shell: true,
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
