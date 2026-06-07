@@ -1,0 +1,11 @@
+{
+  "name": "@tokenwall/estimators",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "js-tiktoken": "^1.0.8",
+    "@tokenwall/core": "file:../core",
+    "@tokenwall/providers": "file:../providers"
+  }
+}

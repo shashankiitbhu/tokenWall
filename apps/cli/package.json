@@ -1,0 +1,16 @@
+{
+  "name": "@tokenwall/cli",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tokenwall": "./dist/index.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@tokenwall/core": "file:../../packages/core"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@tokenwall/providers",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@tokenwall/core": "file:../core"
+  }
+}

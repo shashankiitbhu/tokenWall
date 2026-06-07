@@ -1,0 +1,22 @@
+{
+  "name": "@tokenwall/gateway",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "fastify": "^4.25.0",
+    "@tokenwall/core": "file:../../packages/core",
+    "@tokenwall/estimators": "file:../../packages/estimators",
+    "@tokenwall/providers": "file:../../packages/providers",
+    "@tokenwall/budget-engine": "file:../../packages/budget-engine",
+    "@tokenwall/context-engine": "file:../../packages/context-engine",
+    "@tokenwall/prompt-optimizer": "file:../../packages/prompt-optimizer",
+    "@tokenwall/routing-engine": "file:../../packages/routing-engine",
+    "@tokenwall/telemetry": "file:../../packages/telemetry",
+    "@tokenwall/terminal-ui": "file:../../packages/terminal-ui"
+  }
+}

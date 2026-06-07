@@ -1,0 +1,13 @@
+{
+  "name": "@tokenwall/terminal-ui",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@tokenwall/core": "file:../core",
+    "@tokenwall/estimators": "file:../estimators",
+    "@tokenwall/providers": "file:../providers",
+    "@tokenwall/context-engine": "file:../context-engine",
+    "@tokenwall/routing-engine": "file:../routing-engine"
+  }
+}

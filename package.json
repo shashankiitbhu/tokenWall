@@ -1,0 +1,36 @@
+{
+  "name": "tokenwall-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-Grade AI Spend Prevention & Budget Governance Platform for AI Coding Agents",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node apps/cli/dist/index.js",
+    "build:core": "tsc -p packages/core",
+    "build:providers": "tsc -p packages/providers",
+    "build:estimators": "tsc -p packages/estimators",
+    "build:budget-engine": "tsc -p packages/budget-engine",
+    "build:context-engine": "tsc -p packages/context-engine",
+    "build:prompt-optimizer": "tsc -p packages/prompt-optimizer",
+    "build:routing-engine": "tsc -p packages/routing-engine",
+    "build:telemetry": "tsc -p packages/telemetry",
+    "build:terminal-ui": "tsc -p packages/terminal-ui",
+    "build:gateway": "tsc -p apps/gateway",
+    "build:cli": "tsc -p apps/cli",
+    "build": "npm run build:core && npm run build:providers && npm run build:estimators && npm run build:budget-engine && npm run build:context-engine && npm run build:prompt-optimizer && npm run build:routing-engine && npm run build:telemetry && npm run build:terminal-ui && npm run build:gateway && npm run build:cli",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.19.42",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "fastify": "^5.8.5",
+    "js-tiktoken": "^1.0.21"
+  }
+}

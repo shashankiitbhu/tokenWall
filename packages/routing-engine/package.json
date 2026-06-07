@@ -1,0 +1,11 @@
+{
+  "name": "@tokenwall/routing-engine",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@tokenwall/core": "file:../core",
+    "@tokenwall/providers": "file:../providers",
+    "@tokenwall/estimators": "file:../estimators"
+  }
+}
