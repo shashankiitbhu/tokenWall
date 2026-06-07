@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-
+import { TerminalUI } from '@tokenwall/terminal-ui';
 
 export interface ApprovalRequest {
   requestId: string;
@@ -58,6 +58,20 @@ export class ControlPlane {
 
   requestApproval(request: ApprovalRequest): Promise<{ action: 'approve' | 'optimize' | 'switch_model' | 'cancel', chosenModel?: string }> {
     console.log('Requesting approval for', request.requestId);
+    
+    // Fallback to native OS dialog if no WebSocket clients are connected
+    if (this.clients.size === 0) {
+      console.log('No control plane client connected. Falling back to native OS dialog...');
+      return new Promise(async (resolve) => {
+        const action = await TerminalUI.askApproval(request.estimatedCost.toFixed(4), request.model);
+        let chosenModel: string | undefined = undefined;
+        if (action === 'switch_model' && request.routingAlternatives && request.routingAlternatives.length > 0) {
+          chosenModel = request.routingAlternatives[0].model;
+        }
+        resolve({ action, chosenModel });
+      });
+    }
+
     return new Promise((resolve) => {
       this.pendingApprovals.set(request.requestId, { request, resolve });
       this.broadcast({

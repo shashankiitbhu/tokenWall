@@ -63,7 +63,14 @@ async function testAnthropic() {
   } catch (e) {
     console.error('❌ Anthropic IPC Test failed', e);
   } finally {
-    ws.close();
+    try {
+      if (ws.readyState === 1) { // OPEN
+        ws.close();
+      } else if (ws.readyState === 0) { // CONNECTING
+        ws.on('open', () => ws.close());
+        ws.on('error', () => {}); // ignore errors during abort
+      }
+    } catch (e) {}
     gatewayServer.kill();
   }
 }
@@ -125,7 +132,14 @@ async function testGemini() {
   } catch (e) {
     console.error('❌ Gemini IPC Test failed', e);
   } finally {
-    ws.close();
+    try {
+      if (ws.readyState === 1) { // OPEN
+        ws.close();
+      } else if (ws.readyState === 0) { // CONNECTING
+        ws.on('open', () => ws.close());
+        ws.on('error', () => {}); // ignore errors during abort
+      }
+    } catch (e) {}
     gatewayServer.kill();
   }
 }

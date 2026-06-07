@@ -283,12 +283,16 @@ This command:
 
 ## 14. Using Approval Workflows
 
-When a warning condition is met (estimated cost > `$0.05`, budget warnings, routing optimization suggested), TokenWall interrupts execution:
+When a warning condition is met (estimated cost > `$0.05`, budget limits exceeded, routing alternatives suggested, or context inefficiencies identified), TokenWall intercepts the outgoing LLM request and halts the upstream send:
 
-- **Approve (`y`)**: Forwards the request exactly as requested.
-- **Deny (`n`)**: Blocks the request and returns a user cancel error code to the agent.
-- **Optimize (`o`)**: Truncates lockfiles/binary content, compresses prompt instructions, and sends the optimized payload.
-- **Switch Model (`s`)**: Routes the request to one of the cheaper suggested alternatives to save costs.
+1. **Active Control Plane Client Mode**: If you have `tokenwall approve` or the Web Dashboard open, TokenWall sends a websocket event. You can interactively resolve it (`y` to Approve, `n` to Deny, `o` to Optimize, `s` to Switch Model).
+2. **Zero-Config Native Dialog Fallback**: If no control plane client or dashboard is connected, TokenWall automatically detects this and displays a **native out-of-band OS dialog popup window** (e.g. macOS AppleScript prompt) on top of VS Code / your desktop. This prevents TTY collisions with your agent and lets you approve/optimize/switch/cancel directly with a mouse click or hotkey.
+
+The actions do the following:
+- **Approve**: Forwards the request exactly as requested.
+- **Deny / Cancel**: Blocks the request and returns a user cancel error code (HTTP `402`) to the agent.
+- **Optimize**: Truncates lockfiles/binary content, compresses prompt instructions, and sends the optimized payload to save tokens.
+- **Switch Model**: Routes the request to one of the cheaper suggested alternatives to save costs.
 
 ---
 

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.controlPlane = exports.ControlPlane = void 0;
+const terminal_ui_1 = require("@tokenwall/terminal-ui");
 class ControlPlane {
     clients = new Set();
     pendingApprovals = new Map();
@@ -41,6 +42,18 @@ class ControlPlane {
     }
     requestApproval(request) {
         console.log('Requesting approval for', request.requestId);
+        // Fallback to native OS dialog if no WebSocket clients are connected
+        if (this.clients.size === 0) {
+            console.log('No control plane client connected. Falling back to native OS dialog...');
+            return new Promise(async (resolve) => {
+                const action = await terminal_ui_1.TerminalUI.askApproval(request.estimatedCost.toFixed(4), request.model);
+                let chosenModel = undefined;
+                if (action === 'switch_model' && request.routingAlternatives && request.routingAlternatives.length > 0) {
+                    chosenModel = request.routingAlternatives[0].model;
+                }
+                resolve({ action, chosenModel });
+            });
+        }
         return new Promise((resolve) => {
             this.pendingApprovals.set(request.requestId, { request, resolve });
             this.broadcast({
