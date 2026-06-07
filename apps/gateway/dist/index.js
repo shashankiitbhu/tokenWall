@@ -214,7 +214,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Forward request headers
     const forwardHeaders = {};
     for (const [key, value] of Object.entries(request.headers)) {
-        if (key.toLowerCase() !== 'host' && key.toLowerCase() !== 'connection') {
+        if (key.toLowerCase() !== 'host' && key.toLowerCase() !== 'connection' && key.toLowerCase() !== 'content-length') {
             forwardHeaders[key] = value;
         }
     }
