@@ -97,6 +97,53 @@ server.post('/v1beta/models/*', async (request, reply) => {
     const targetUrl = `${baseUrl}${modelUrl}`;
     return handleInterception('gemini', targetUrl, request, reply);
 });
+function getOptimizedMessages(originalMessages, cleanMessages, lastUserIdx, optimization) {
+    if (!originalMessages)
+        return originalMessages;
+    const newMessages = JSON.parse(JSON.stringify(originalMessages));
+    for (let i = 0; i < newMessages.length; i++) {
+        const origMsg = newMessages[i];
+        const cleanMsg = cleanMessages[i];
+        if (!cleanMsg)
+            continue;
+        let newText = cleanMsg.content;
+        if (i === lastUserIdx && optimization) {
+            newText = optimization.optimizedText;
+        }
+        if (typeof origMsg.content === 'string') {
+            origMsg.content = newText;
+        }
+        else if (Array.isArray(origMsg.content)) {
+            const textBlock = origMsg.content.find((b) => b.type === 'text');
+            if (textBlock) {
+                textBlock.text = newText;
+            }
+        }
+    }
+    return newMessages;
+}
+function getOptimizedGeminiContents(originalContents, cleanMessages, lastUserIdx, optimization) {
+    if (!originalContents)
+        return originalContents;
+    const newContents = JSON.parse(JSON.stringify(originalContents));
+    for (let i = 0; i < newContents.length; i++) {
+        const origContent = newContents[i];
+        const cleanMsg = cleanMessages[i];
+        if (!cleanMsg)
+            continue;
+        let newText = cleanMsg.content;
+        if (i === lastUserIdx && optimization) {
+            newText = optimization.optimizedText;
+        }
+        if (Array.isArray(origContent.parts)) {
+            const textPart = origContent.parts.find((p) => typeof p.text === 'string');
+            if (textPart) {
+                textPart.text = newText;
+            }
+        }
+    }
+    return newContents;
+}
 async function handleInterception(provider, targetUrl, request, reply) {
     const sessionId = request.headers['x-tokenwall-session-id'] || 'default-session';
     const projectId = request.headers['x-tokenwall-project-id'] || null;
@@ -227,6 +274,12 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         else {
             // Interactive mode via Control Plane
+            let clientDisconnected = false;
+            const onDisconnect = () => {
+                clientDisconnected = true;
+                control_plane_js_1.controlPlane.cancelApproval(requestId);
+            };
+            request.socket.on('close', onDisconnect);
             const result = await control_plane_js_1.controlPlane.requestApproval({
                 requestId,
                 projectId,
@@ -236,6 +289,12 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 warnings: contextReport.inefficiencies,
                 routingAlternatives: routingOptions.alternatives
             });
+            request.socket.off('close', onDisconnect);
+            if (clientDisconnected) {
+                telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
+                telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
+                return sendBlockedResponse(reply, provider, 499, 'Client disconnected during approval.', 'client_disconnected', 'client_closed_request');
+            }
             action = result.action;
             chosenModel = result.chosenModel;
             if (action === 'cancel') {
@@ -255,29 +314,23 @@ async function handleInterception(provider, targetUrl, request, reply) {
     let finalRequest = parsedRequest;
     let savedTokens = 0;
     if (action === 'optimize') {
-        // Replace payload messages with optimized cleanMessages
         const cleanMsgs = contextReport.cleanMessages;
-        // Apply heuristic prompt rewrite to the last user message
         const lastUserIdx = cleanMsgs.map(m => m.role).lastIndexOf('user');
         if (lastUserIdx !== -1 && optimization) {
-            cleanMsgs[lastUserIdx].content = optimization.optimizedText;
             savedTokens += optimization.tokensSaved;
         }
         savedTokens += contextReport.totalWasteTokens;
-        // Re-serialize back to provider schema
+        // Re-serialize back to provider schema while preserving non-text blocks
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: cleanMsgs.map(m => ({ role: m.role, content: m.content }))
+                messages: getOptimizedMessages(request.body.messages, cleanMsgs, lastUserIdx, optimization)
             };
         }
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: cleanMsgs.map(m => ({
-                    role: m.role === 'assistant' ? 'model' : 'user',
-                    parts: [{ text: m.content }]
-                }))
+                contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, lastUserIdx, optimization)
             };
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };

@@ -16,6 +16,7 @@ export declare class ControlPlane {
         action: 'approve' | 'optimize' | 'switch_model' | 'cancel';
         chosenModel?: string;
     }>;
+    cancelApproval(requestId: string): void;
     sendNotification(message: string, style?: 'info' | 'warning' | 'error'): void;
     private broadcast;
 }

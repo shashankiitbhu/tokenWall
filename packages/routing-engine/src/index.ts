@@ -100,7 +100,7 @@ export class ModelRouter {
     
     let candidateModels: string[] = [];
     if (ecosystem === 'anthropic') {
-      candidateModels = ['claude-3-opus', 'claude-3-5-sonnet', 'claude-3-5-haiku'];
+      candidateModels = ['claude-3-opus-20240229', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'];
     } else if (ecosystem === 'gemini') {
       candidateModels = ['gemini-1.5-pro', 'gemini-1.5-flash'];
     } else {

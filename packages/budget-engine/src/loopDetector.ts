@@ -13,11 +13,11 @@ export class RunawayLoopDetector {
   }
 
   detect(sessionId: string, newPrompt: string, newInputTokens: number): LoopDetectResult {
-    // Retrieve the last 4 requests from this session
+    // Retrieve the last 4 requests from this session, excluding blocked or cancelled requests
     const recentRequests = this.db.db.prepare(`
       SELECT model, input_tokens, output_tokens, status, created_at
       FROM requests
-      WHERE session_id = ?
+      WHERE session_id = ? AND status != 'blocked' AND state != 'cancelled'
       ORDER BY created_at DESC
       LIMIT 4
     `).all(sessionId) as Array<{
@@ -93,10 +93,14 @@ export class RunawayLoopDetector {
     
     // If 4 consecutive requests have exactly the same input token size, it is a high-probability prompt loop
     if (uniqueTokens.size === 1) {
-      return {
-        loopDetected: true,
-        reason: 'Loop Protection: Duplicate prompt footprint detected. Multiple sequential requests have the exact same token footprint (potential infinite retry loop). (Bypass: Wait 60s for a quiet period reset, or change your prompt content slightly).'
-      };
+      const lastRequestTime = new Date(recentRequests[0].created_at + ' UTC').getTime();
+      const secondsSinceLastRequest = (Date.now() - lastRequestTime) / 1000;
+      if (secondsSinceLastRequest < 15) {
+        return {
+          loopDetected: true,
+          reason: 'Loop Protection: Duplicate prompt footprint detected. Multiple sequential requests have the exact same token footprint (potential infinite retry loop). (Bypass: Wait 60s for a quiet period reset, or change your prompt content slightly).'
+        };
+      }
     }
 
     return { loopDetected: false };

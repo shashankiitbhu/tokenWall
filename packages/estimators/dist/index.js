@@ -11,7 +11,9 @@ exports.PRICING_DIRECTORY = {
     'claude-3-5-sonnet': { inputPerMillion: 3.00, outputPerMillion: 15.00, contextWindow: 200000 },
     'claude-3-5-sonnet-20241022': { inputPerMillion: 3.00, outputPerMillion: 15.00, contextWindow: 200000 },
     'claude-3-5-haiku': { inputPerMillion: 0.80, outputPerMillion: 4.00, contextWindow: 200000 },
+    'claude-3-5-haiku-20241022': { inputPerMillion: 0.80, outputPerMillion: 4.00, contextWindow: 200000 },
     'claude-3-opus': { inputPerMillion: 15.00, outputPerMillion: 75.00, contextWindow: 200000 },
+    'claude-3-opus-20240229': { inputPerMillion: 15.00, outputPerMillion: 75.00, contextWindow: 200000 },
     'claude-3-haiku': { inputPerMillion: 0.25, outputPerMillion: 1.25, contextWindow: 200000 },
     // OpenAI
     'gpt-4o': { inputPerMillion: 5.00, outputPerMillion: 15.00, contextWindow: 128000 },

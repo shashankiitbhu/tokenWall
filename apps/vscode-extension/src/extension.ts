@@ -11,6 +11,7 @@ let statusBarItem: vscode.StatusBarItem | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
 let isConnected = false;
+const activeQuickPicks = new Map<string, any>();
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
@@ -235,6 +236,12 @@ function connectControlPlane(context: vscode.ExtensionContext) {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'approval_pending') {
         await handlePendingApproval(msg.payload);
+      } else if (msg.type === 'approval_cleared') {
+        const { requestId } = msg.payload;
+        const qp = activeQuickPicks.get(requestId);
+        if (qp) {
+          qp.hide();
+        }
       } else if (msg.type === 'notification') {
         const { message, style } = msg.payload;
         if (style === 'error') {
@@ -287,70 +294,99 @@ interface PendingApprovalRequest {
 async function handlePendingApproval(req: PendingApprovalRequest) {
   const costText = `$${req.estimatedCost.toFixed(4)}`;
   const warningsList = req.warnings.length > 0 
-    ? `\n\nWarnings:\n - ${req.warnings.map((w: any) => typeof w === 'string' ? w : w.description).join('\n - ')}` 
+    ? `Warnings: ${req.warnings.map((w: any) => typeof w === 'string' ? w : w.description).join('; ')}` 
     : '';
 
-  const alternativesAvailable = req.routingAlternatives && req.routingAlternatives.length > 0;
-  const buttons = ['Approve'];
-  
+  const quickPick = vscode.window.createQuickPick();
+  quickPick.title = `TokenWall Intercept [${req.requestId}]`;
+  quickPick.placeholder = `Model: ${req.model} | Cost: ${costText} ${warningsList ? ' | ' + warningsList : ''}`;
+
+  const items: vscode.QuickPickItem[] = [
+    { label: 'Approve', description: 'Proceed with this request' }
+  ];
   if (req.warnings.length > 0) {
-    buttons.push('Optimize Prompt');
+    items.push({ label: 'Optimize Prompt', description: 'Optimize prompt (strip waste) and proceed' });
   }
-  if (alternativesAvailable) {
-    buttons.push('Switch Model');
+  if (req.routingAlternatives && req.routingAlternatives.length > 0) {
+    items.push({ label: 'Switch Model', description: 'Switch to a cost-efficient model' });
   }
-  buttons.push('Cancel');
+  items.push({ label: 'Cancel', description: 'Block this request' });
 
-  const selection = await vscode.window.showWarningMessage(
-    `TokenWall Spend Intercept [${req.requestId}]\n` +
-    `Model: ${req.model}\n` +
-    `Estimated Cost: ${costText}` +
-    warningsList,
-    { modal: true },
-    ...buttons
-  );
+  quickPick.items = items;
+  quickPick.ignoreFocusOut = true;
 
-  let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'cancel';
-  let chosenModel: string | undefined = undefined;
+  activeQuickPicks.set(req.requestId, quickPick);
 
-  if (selection === 'Approve') {
-    action = 'approve';
-  } else if (selection === 'Optimize Prompt') {
-    action = 'optimize';
-  } else if (selection === 'Switch Model' && req.routingAlternatives) {
-    const quickPickItems = req.routingAlternatives.map((alt) => ({
-      label: alt.model,
-      description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
-      detail: `Quality Level: ${alt.qualityLevel}`,
-      modelName: alt.model
-    }));
+  let resolved = false;
 
-    const picked = await vscode.window.showQuickPick(quickPickItems, {
-      title: 'Select Cost-Efficient Model Alternative',
-      placeHolder: `Switch from ${req.model}`
-    });
+  quickPick.onDidAccept(async () => {
+    const selected = quickPick.selectedItems[0];
+    if (!selected) return;
 
-    if (picked) {
-      action = 'switch_model';
-      chosenModel = picked.modelName;
-    } else {
-      action = 'cancel';
+    resolved = true;
+    quickPick.hide();
+
+    let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'cancel';
+    let chosenModel: string | undefined = undefined;
+
+    if (selected.label === 'Approve') {
+      action = 'approve';
+    } else if (selected.label === 'Optimize Prompt') {
+      action = 'optimize';
+    } else if (selected.label === 'Switch Model' && req.routingAlternatives) {
+      const quickPickItems = req.routingAlternatives.map((alt) => ({
+        label: alt.model,
+        description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
+        detail: `Quality Level: ${alt.qualityLevel}`,
+        modelName: alt.model
+      }));
+
+      const picked = await vscode.window.showQuickPick(quickPickItems, {
+        title: 'Select Cost-Efficient Model Alternative',
+        placeHolder: `Switch from ${req.model}`
+      });
+
+      if (picked) {
+        action = 'switch_model';
+        chosenModel = picked.modelName;
+      } else {
+        action = 'cancel';
+      }
     }
-  }
 
-  // Send resolution back to gateway control plane
-  if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-    wsClient.send(
-      JSON.stringify({
-        type: 'approval_resolved',
-        payload: {
-          requestId: req.requestId,
-          action,
-          chosenModel
-        }
-      })
-    );
-  }
+    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+      wsClient.send(
+        JSON.stringify({
+          type: 'approval_resolved',
+          payload: {
+            requestId: req.requestId,
+            action,
+            chosenModel
+          }
+        })
+      );
+    }
+  });
+
+  quickPick.onDidHide(() => {
+    if (!resolved) {
+      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.send(
+          JSON.stringify({
+            type: 'approval_resolved',
+            payload: {
+              requestId: req.requestId,
+              action: 'cancel'
+            }
+          })
+        );
+      }
+    }
+    activeQuickPicks.delete(req.requestId);
+    quickPick.dispose();
+  });
+
+  quickPick.show();
 }
 
 // -------------------------------------------------------------

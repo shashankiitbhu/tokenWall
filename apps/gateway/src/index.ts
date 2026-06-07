@@ -107,6 +107,62 @@ server.post('/v1beta/models/*', async (request, reply) => {
   return handleInterception('gemini', targetUrl, request, reply);
 });
 
+function getOptimizedMessages(
+  originalMessages: any[],
+  cleanMessages: any[],
+  lastUserIdx: number,
+  optimization: any
+): any[] {
+  if (!originalMessages) return originalMessages;
+  const newMessages = JSON.parse(JSON.stringify(originalMessages));
+  for (let i = 0; i < newMessages.length; i++) {
+    const origMsg = newMessages[i];
+    const cleanMsg = cleanMessages[i];
+    if (!cleanMsg) continue;
+    let newText = cleanMsg.content;
+    if (i === lastUserIdx && optimization) {
+      newText = optimization.optimizedText;
+    }
+
+    if (typeof origMsg.content === 'string') {
+      origMsg.content = newText;
+    } else if (Array.isArray(origMsg.content)) {
+      const textBlock = origMsg.content.find((b: any) => b.type === 'text');
+      if (textBlock) {
+        textBlock.text = newText;
+      }
+    }
+  }
+  return newMessages;
+}
+
+function getOptimizedGeminiContents(
+  originalContents: any[],
+  cleanMessages: any[],
+  lastUserIdx: number,
+  optimization: any
+): any[] {
+  if (!originalContents) return originalContents;
+  const newContents = JSON.parse(JSON.stringify(originalContents));
+  for (let i = 0; i < newContents.length; i++) {
+    const origContent = newContents[i];
+    const cleanMsg = cleanMessages[i];
+    if (!cleanMsg) continue;
+    let newText = cleanMsg.content;
+    if (i === lastUserIdx && optimization) {
+      newText = optimization.optimizedText;
+    }
+
+    if (Array.isArray(origContent.parts)) {
+      const textPart = origContent.parts.find((p: any) => typeof p.text === 'string');
+      if (textPart) {
+        textPart.text = newText;
+      }
+    }
+  }
+  return newContents;
+}
+
 async function handleInterception(
   provider: 'openai' | 'anthropic' | 'gemini',
   targetUrl: string,
@@ -263,6 +319,13 @@ async function handleInterception(
       }
     } else {
       // Interactive mode via Control Plane
+      let clientDisconnected = false;
+      const onDisconnect = () => {
+        clientDisconnected = true;
+        controlPlane.cancelApproval(requestId);
+      };
+      request.socket.on('close', onDisconnect);
+
       const result = await controlPlane.requestApproval({
         requestId,
         projectId,
@@ -272,6 +335,22 @@ async function handleInterception(
         warnings: contextReport.inefficiencies,
         routingAlternatives: routingOptions.alternatives
       });
+
+      request.socket.off('close', onDisconnect);
+
+      if (clientDisconnected) {
+        telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
+        telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
+        return sendBlockedResponse(
+          reply,
+          provider,
+          499,
+          'Client disconnected during approval.',
+          'client_disconnected',
+          'client_closed_request'
+        );
+      }
+
       action = result.action;
       chosenModel = result.chosenModel;
 
@@ -301,31 +380,24 @@ async function handleInterception(
   let savedTokens = 0;
 
   if (action === 'optimize') {
-    // Replace payload messages with optimized cleanMessages
     const cleanMsgs = contextReport.cleanMessages;
-    
-    // Apply heuristic prompt rewrite to the last user message
     const lastUserIdx = cleanMsgs.map(m => m.role).lastIndexOf('user');
+    
     if (lastUserIdx !== -1 && optimization) {
-      cleanMsgs[lastUserIdx].content = optimization.optimizedText;
       savedTokens += optimization.tokensSaved;
     }
-    
     savedTokens += contextReport.totalWasteTokens;
 
-    // Re-serialize back to provider schema
+    // Re-serialize back to provider schema while preserving non-text blocks
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: cleanMsgs.map(m => ({ role: m.role, content: m.content }))
+        messages: getOptimizedMessages(request.body.messages, cleanMsgs, lastUserIdx, optimization)
       };
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: cleanMsgs.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        }))
+        contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, lastUserIdx, optimization)
       };
     }
     finalRequest = { ...parsedRequest, messages: cleanMsgs };

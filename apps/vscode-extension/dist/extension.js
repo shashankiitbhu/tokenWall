@@ -50,6 +50,7 @@ let statusBarItem = null;
 let reconnectTimer = null;
 let pollTimer = null;
 let isConnected = false;
+const activeQuickPicks = new Map();
 function activate(context) {
     console.log('TokenWall VS Code companion extension is now active.');
     // Diagnostic dump of active extensions
@@ -251,6 +252,13 @@ function connectControlPlane(context) {
             if (msg.type === 'approval_pending') {
                 await handlePendingApproval(msg.payload);
             }
+            else if (msg.type === 'approval_cleared') {
+                const { requestId } = msg.payload;
+                const qp = activeQuickPicks.get(requestId);
+                if (qp) {
+                    qp.hide();
+                }
+            }
             else if (msg.type === 'notification') {
                 const { message, style } = msg.payload;
                 if (style === 'error') {
@@ -285,59 +293,85 @@ function connectControlPlane(context) {
 async function handlePendingApproval(req) {
     const costText = `$${req.estimatedCost.toFixed(4)}`;
     const warningsList = req.warnings.length > 0
-        ? `\n\nWarnings:\n - ${req.warnings.map((w) => typeof w === 'string' ? w : w.description).join('\n - ')}`
+        ? `Warnings: ${req.warnings.map((w) => typeof w === 'string' ? w : w.description).join('; ')}`
         : '';
-    const alternativesAvailable = req.routingAlternatives && req.routingAlternatives.length > 0;
-    const buttons = ['Approve'];
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.title = `TokenWall Intercept [${req.requestId}]`;
+    quickPick.placeholder = `Model: ${req.model} | Cost: ${costText} ${warningsList ? ' | ' + warningsList : ''}`;
+    const items = [
+        { label: 'Approve', description: 'Proceed with this request' }
+    ];
     if (req.warnings.length > 0) {
-        buttons.push('Optimize Prompt');
+        items.push({ label: 'Optimize Prompt', description: 'Optimize prompt (strip waste) and proceed' });
     }
-    if (alternativesAvailable) {
-        buttons.push('Switch Model');
+    if (req.routingAlternatives && req.routingAlternatives.length > 0) {
+        items.push({ label: 'Switch Model', description: 'Switch to a cost-efficient model' });
     }
-    buttons.push('Cancel');
-    const selection = await vscode.window.showWarningMessage(`TokenWall Spend Intercept [${req.requestId}]\n` +
-        `Model: ${req.model}\n` +
-        `Estimated Cost: ${costText}` +
-        warningsList, { modal: true }, ...buttons);
-    let action = 'cancel';
-    let chosenModel = undefined;
-    if (selection === 'Approve') {
-        action = 'approve';
-    }
-    else if (selection === 'Optimize Prompt') {
-        action = 'optimize';
-    }
-    else if (selection === 'Switch Model' && req.routingAlternatives) {
-        const quickPickItems = req.routingAlternatives.map((alt) => ({
-            label: alt.model,
-            description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
-            detail: `Quality Level: ${alt.qualityLevel}`,
-            modelName: alt.model
-        }));
-        const picked = await vscode.window.showQuickPick(quickPickItems, {
-            title: 'Select Cost-Efficient Model Alternative',
-            placeHolder: `Switch from ${req.model}`
-        });
-        if (picked) {
-            action = 'switch_model';
-            chosenModel = picked.modelName;
+    items.push({ label: 'Cancel', description: 'Block this request' });
+    quickPick.items = items;
+    quickPick.ignoreFocusOut = true;
+    activeQuickPicks.set(req.requestId, quickPick);
+    let resolved = false;
+    quickPick.onDidAccept(async () => {
+        const selected = quickPick.selectedItems[0];
+        if (!selected)
+            return;
+        resolved = true;
+        quickPick.hide();
+        let action = 'cancel';
+        let chosenModel = undefined;
+        if (selected.label === 'Approve') {
+            action = 'approve';
         }
-        else {
-            action = 'cancel';
+        else if (selected.label === 'Optimize Prompt') {
+            action = 'optimize';
         }
-    }
-    // Send resolution back to gateway control plane
-    if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
-        wsClient.send(JSON.stringify({
-            type: 'approval_resolved',
-            payload: {
-                requestId: req.requestId,
-                action,
-                chosenModel
+        else if (selected.label === 'Switch Model' && req.routingAlternatives) {
+            const quickPickItems = req.routingAlternatives.map((alt) => ({
+                label: alt.model,
+                description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
+                detail: `Quality Level: ${alt.qualityLevel}`,
+                modelName: alt.model
+            }));
+            const picked = await vscode.window.showQuickPick(quickPickItems, {
+                title: 'Select Cost-Efficient Model Alternative',
+                placeHolder: `Switch from ${req.model}`
+            });
+            if (picked) {
+                action = 'switch_model';
+                chosenModel = picked.modelName;
             }
-        }));
-    }
+            else {
+                action = 'cancel';
+            }
+        }
+        if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
+            wsClient.send(JSON.stringify({
+                type: 'approval_resolved',
+                payload: {
+                    requestId: req.requestId,
+                    action,
+                    chosenModel
+                }
+            }));
+        }
+    });
+    quickPick.onDidHide(() => {
+        if (!resolved) {
+            if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
+                wsClient.send(JSON.stringify({
+                    type: 'approval_resolved',
+                    payload: {
+                        requestId: req.requestId,
+                        action: 'cancel'
+                    }
+                }));
+            }
+        }
+        activeQuickPicks.delete(req.requestId);
+        quickPick.dispose();
+    });
+    quickPick.show();
 }
 // -------------------------------------------------------------
 // Live Observability Status Bar & Stats Fetch

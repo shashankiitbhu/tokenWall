@@ -71,7 +71,14 @@ async function testIPC() {
   } catch (e) {
     console.error('❌ IPC Test failed', e);
   } finally {
-    ws.close();
+    try {
+      if (ws.readyState === 1) { // OPEN
+        ws.close();
+      } else if (ws.readyState === 0) { // CONNECTING
+        ws.on('open', () => ws.close());
+        ws.on('error', () => {}); // ignore errors during abort
+      }
+    } catch (e) {}
     gatewayServer.kill();
   }
 }

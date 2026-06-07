@@ -81,6 +81,15 @@ export class ControlPlane {
     });
   }
 
+  cancelApproval(requestId: string) {
+    const pending = this.pendingApprovals.get(requestId);
+    if (pending) {
+      pending.resolve({ action: 'cancel' });
+      this.pendingApprovals.delete(requestId);
+      this.broadcast({ type: 'approval_cleared', payload: { requestId } });
+    }
+  }
+
   sendNotification(message: string, style: 'info' | 'warning' | 'error' = 'info') {
     this.broadcast({
       type: 'notification',

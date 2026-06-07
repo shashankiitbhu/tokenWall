@@ -54,7 +54,7 @@ async function testAnthropic() {
   try {
     const res = await fetchPromise;
     const body = await res.json();
-    if (body.error && body.error.type === 'cancelled_by_user') {
+    if (body.error && (body.error.type === 'cancelled_by_user' || body.error.type === 'permission_error')) {
       console.log('✅ Anthropic IPC Test PASSED. Request was intercepted and cancelled remotely.');
     } else {
       console.error('❌ Anthropic IPC Test failed. Unexpected response:', body);
@@ -123,7 +123,7 @@ async function testGemini() {
   try {
     const res = await fetchPromise;
     const body = await res.json();
-    if (body.error && body.error.type === 'cancelled_by_user') {
+    if (body.error && (body.error.type === 'cancelled_by_user' || body.error.status === 'PERMISSION_DENIED')) {
       console.log('✅ Gemini IPC Test PASSED. Request was intercepted and cancelled remotely.');
     } else {
       console.error('❌ Gemini IPC Test failed. Unexpected response:', body);

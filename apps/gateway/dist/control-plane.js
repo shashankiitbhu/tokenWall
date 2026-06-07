@@ -62,6 +62,14 @@ class ControlPlane {
             });
         });
     }
+    cancelApproval(requestId) {
+        const pending = this.pendingApprovals.get(requestId);
+        if (pending) {
+            pending.resolve({ action: 'cancel' });
+            this.pendingApprovals.delete(requestId);
+            this.broadcast({ type: 'approval_cleared', payload: { requestId } });
+        }
+    }
     sendNotification(message, style = 'info') {
         this.broadcast({
             type: 'notification',
