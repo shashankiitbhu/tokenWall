@@ -59,7 +59,7 @@ function activate(context) {
     updateStatusBarText('Initializing...', 'yellow');
     statusBarItem.show();
     // 2. Setup environment interception
-    updateTerminalEnvironment(context);
+    updateTerminalEnvironment(context).catch(console.error);
     // 3. Start Daemon Manager & Control Plane Listener
     startDaemonManager(context);
     connectControlPlane(context);
@@ -73,7 +73,7 @@ function activate(context) {
     // 5. Watch settings configuration changes
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('tokenwall')) {
-            updateTerminalEnvironment(context);
+            updateTerminalEnvironment(context).catch(console.error);
             syncSettingsToConfigFile();
         }
     }));
@@ -90,7 +90,30 @@ function deactivate() {
 // -------------------------------------------------------------
 // Terminal Environment Injection
 // -------------------------------------------------------------
-function updateTerminalEnvironment(context) {
+async function getOrCreateWorkspaceProject() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0)
+        return null;
+    const folder = folders[0];
+    const name = folder.name;
+    const dirPath = folder.uri.fsPath;
+    try {
+        const res = await fetch('http://localhost:1984/api/admin/project/get-or-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, path: dirPath })
+        });
+        if (res.ok) {
+            const proj = await res.json();
+            return proj.id;
+        }
+    }
+    catch (e) {
+        console.error('Failed to register project folder with gateway', e);
+    }
+    return null;
+}
+async function updateTerminalEnvironment(context) {
     const env = context.environmentVariableCollection;
     const config = vscode.workspace.getConfiguration('tokenwall');
     const enableInterception = config.get('enableAutoInterception', true);
@@ -98,6 +121,14 @@ function updateTerminalEnvironment(context) {
         env.replace('ANTHROPIC_BASE_URL', 'http://localhost:1984');
         env.replace('OPENAI_BASE_URL', 'http://localhost:1984/v1');
         env.replace('GEMINI_BASE_URL', 'http://localhost:1984');
+        // Auto-detect project id from active workspace folder
+        try {
+            const projectId = await getOrCreateWorkspaceProject();
+            if (projectId) {
+                env.replace('TOKENWALL_PROJECT_ID', projectId);
+            }
+        }
+        catch { }
     }
     else {
         env.clear();
@@ -288,22 +319,20 @@ async function fetchStatsAndUpdateUI() {
     if (!isConnected)
         return;
     try {
-        const res = await fetch('http://localhost:1984/api/admin/budgets');
+        const res = await fetch('http://localhost:1984/api/admin/summary');
         if (res.ok) {
-            const budgets = await res.json();
-            const daily = budgets.find(b => b.period === 'daily');
-            if (daily) {
-                const text = `TokenWall: $${daily.current_spend.toFixed(2)}`;
-                const warningPercent = daily.current_spend / daily.limit_amount;
-                let color = 'green';
-                if (warningPercent >= 0.9) {
-                    color = 'red';
-                }
-                else if (warningPercent >= 0.7) {
-                    color = 'yellow';
-                }
-                updateStatusBarText(text, color);
+            const summary = await res.json();
+            const totalSaved = summary.preventedSpend + summary.optimizedSavings;
+            const text = `Today: $${summary.dailySpend.toFixed(2)} • Saved: $${totalSaved.toFixed(2)}`;
+            const warningPercent = summary.dailySpend / (summary.dailyLimit || 10.0);
+            let color = 'green';
+            if (warningPercent >= 0.9) {
+                color = 'red';
             }
+            else if (warningPercent >= 0.7) {
+                color = 'yellow';
+            }
+            updateStatusBarText(text, color);
         }
     }
     catch {
@@ -326,20 +355,54 @@ function updateStatusBarText(text, color) {
 }
 async function showStatusSummary() {
     try {
-        const res = await fetch('http://localhost:1984/api/admin/budgets');
+        const res = await fetch('http://localhost:1984/api/admin/summary');
         if (!res.ok) {
             vscode.window.showErrorMessage('TokenWall Gateway daemon API is unreachable.');
             return;
         }
-        const budgets = await res.json();
-        const quickPickItems = budgets.map((b) => ({
-            label: `${b.period.toUpperCase()} Spend`,
-            description: `$${b.current_spend.toFixed(4)} / $${b.limit_amount.toFixed(2)}`,
-            detail: `Limit Type: ${b.hard_limit === 1 ? 'Hard Limit (Blocks)' : 'Soft Limit (Warn Only)'}`
-        }));
+        const summary = await res.json();
+        const totalSaved = summary.preventedSpend + summary.optimizedSavings;
+        const quickPickItems = [
+            {
+                label: `Today's Spend: $${summary.dailySpend.toFixed(4)} / $${summary.dailyLimit.toFixed(2)}`,
+                detail: `Daily budget consumption: ${Math.round((summary.dailySpend / (summary.dailyLimit || 10.0)) * 100)}%`
+            },
+            {
+                label: `Total Prevented Cost: $${summary.preventedSpend.toFixed(4)}`,
+                detail: 'Savings from blocked runaway loops or budget blocks'
+            },
+            {
+                label: `Total Optimized Savings: $${summary.optimizedSavings.toFixed(4)}`,
+                detail: `Saved ${summary.savedTokens.toLocaleString()} tokens via prompt compressions / switches`
+            },
+            {
+                label: '--- Workspace Attribution ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.workspaces.map(w => ({
+                label: `  ${w.project_name}`,
+                detail: `Accumulated Spend: $${w.total_spend.toFixed(4)}`
+            })),
+            {
+                label: '--- Provider Breakdown ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.providers.map(p => ({
+                label: `  ${p.provider.toUpperCase()}`,
+                detail: `Spend: $${p.total_spend.toFixed(4)} (${p.request_count} requests)`
+            })),
+            {
+                label: '--- Model Breakdown ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.models.map(m => ({
+                label: `  ${m.model}`,
+                detail: `Spend: $${m.total_spend.toFixed(4)} (${m.request_count} requests)`
+            }))
+        ];
         vscode.window.showQuickPick(quickPickItems, {
-            title: 'TokenWall Budget Status Overview',
-            placeHolder: 'Select item to refresh status'
+            title: `TokenWall Summary • Total Savings: $${totalSaved.toFixed(2)}`,
+            placeHolder: 'Select any item to close status'
         });
     }
     catch (err) {

@@ -46,6 +46,38 @@ server.get('/api/admin/budgets', async (request, reply) => {
   return reply.send(budgets);
 });
 
+server.get('/api/admin/summary', async (request, reply) => {
+  const savings = db.getSavingsSummary();
+  const workspaces = db.getWorkspaceUsage();
+  const providers = db.getProviderUsage();
+  const models = db.getModelUsage();
+  
+  const budgets = db.getBudgets(null);
+  const daily = budgets.find(b => b.period === 'daily');
+  const dailySpend = daily?.current_spend || 0;
+  const dailyLimit = daily?.limit_amount || 0;
+
+  return reply.send({
+    dailySpend,
+    dailyLimit,
+    preventedSpend: savings.preventedSpend,
+    optimizedSavings: savings.optimizedSavings,
+    savedTokens: savings.savedTokens,
+    workspaces,
+    providers,
+    models
+  });
+});
+
+server.post('/api/admin/project/get-or-create', async (request: any, reply) => {
+  const { name, path: dirPath } = request.body || {};
+  if (!name || !dirPath) {
+    return reply.status(400).send({ error: 'Missing name or path' });
+  }
+  const project = db.getOrCreateProject(name, dirPath);
+  return reply.send(project);
+});
+
 const PORT = 1984;
 
 // Intercept OpenAI Chat Completions
@@ -126,6 +158,15 @@ async function handleInterception(
       model: parsedRequest.model,
       metadata: { reason: loopCheck.reason }
     });
+    const savingsId = Math.random().toString(36).substring(2, 11);
+    db.logSavingsEvent({
+      id: savingsId,
+      sessionId,
+      requestId,
+      type: 'block_runaway',
+      amount: estimation.estimatedCost,
+      tokens: estimation.estimatedInputTokens + estimation.estimatedOutputTokens
+    });
     TerminalUI.drawBlockedAlert(loopCheck.reason || 'Runaway loop detected');
     telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'failed'); // using generated requestId instead of dummy
     return reply.status(429).send({
@@ -148,6 +189,15 @@ async function handleInterception(
       provider,
       model: parsedRequest.model,
       metadata: { reason: budgetCheck.blockedReason, estimatedCost: estimation.estimatedCost }
+    });
+    const savingsId = Math.random().toString(36).substring(2, 11);
+    db.logSavingsEvent({
+      id: savingsId,
+      sessionId,
+      requestId,
+      type: 'block_budget',
+      amount: estimation.estimatedCost,
+      tokens: estimation.estimatedInputTokens + estimation.estimatedOutputTokens
     });
     TerminalUI.drawBlockedAlert(budgetCheck.blockedReason || 'Budget Exceeded');
     return reply.status(402).send({
@@ -276,6 +326,17 @@ async function handleInterception(
     }
     finalRequest = { ...parsedRequest, messages: cleanMsgs };
     console.log(c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
+    const pricing = getPricingForModel(parsedRequest.model);
+    const savingsAmount = (savedTokens / 1000000) * pricing.inputPerMillion;
+    const savingsId = Math.random().toString(36).substring(2, 11);
+    db.logSavingsEvent({
+      id: savingsId,
+      sessionId,
+      requestId,
+      type: 'optimize_prompt',
+      amount: savingsAmount,
+      tokens: savedTokens
+    });
   } else if (action === 'switch_model') {
     const recommendedModel = chosenModel || (routingOptions.alternatives.length > 0 ? routingOptions.alternatives[0].model : parsedRequest.model);
     if (provider === 'openai' || provider === 'anthropic') {
@@ -290,6 +351,19 @@ async function handleInterception(
     finalRequest = { ...parsedRequest, model: recommendedModel };
     console.log(c.green(`✔ Switched model to: ${recommendedModel}`));
     db.updateRequestRouting(requestId, parsedRequest.model, 'switched_model');
+    const altPricing = getPricingForModel(recommendedModel);
+    const originalCost = estimation.estimatedCost;
+    const newCost = (estimation.estimatedInputTokens / 1000000) * altPricing.inputPerMillion + (estimation.estimatedOutputTokens / 1000000) * altPricing.outputPerMillion;
+    const savingsAmount = Math.max(0, originalCost - newCost);
+    const savingsId = Math.random().toString(36).substring(2, 11);
+    db.logSavingsEvent({
+      id: savingsId,
+      sessionId,
+      requestId,
+      type: 'switch_model',
+      amount: savingsAmount,
+      tokens: 0
+    });
   }
 
   // Mutate OpenAI Request to include stream_options if streaming
@@ -378,6 +452,12 @@ async function handleInterception(
             if (parsedChunk) {
               if (parsedChunk.text && parsedChunk.text.startsWith('[Tool Use:')) {
                 console.log(`[Stream] [Tool Use] ${parsedChunk.text} detected for request ${requestId}`);
+                const match = parsedChunk.text.match(/\[Tool Use:\s*([^\]]+)\]/);
+                if (match) {
+                  const toolName = match[1];
+                  const toolCallId = Math.random().toString(36).substring(2, 11);
+                  db.logToolCall(toolCallId, requestId, toolName, parsedChunk.text.length);
+                }
               }
               if (parsedChunk.usage) {
                 if (parsedChunk.usage.inputTokens > 0) {

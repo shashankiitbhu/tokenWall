@@ -378,7 +378,9 @@ TokenWall offers a seamless, editor-native companion extension ([package.json](f
 - **Automatic Interception**: Uses VS Code's `EnvironmentVariableCollection` to inject proxy base URLs into all integrated terminals. Running `claude` or other agents in VS Code integrated terminals routes traffic through TokenWall automatically, without needing `tokenwall exec` wrappers.
 - **Native Modal Approvals**: If a query is costly or risky, the extension catches the WebSocket request and displays a native VS Code warning dialog box (`{ modal: true }`). You can choose `Approve`, `Optimize Prompt`, `Switch Model`, or `Cancel` with a click.
 - **Daemon Lifecycle Management**: Verifies health on port `1984` and automatically spawns the proxy server (`npx tokenwall start`) in the background if it is offline.
-- **Spend Tracking**: Displays your current daily spend in the status bar (e.g. `$(shield) TokenWall: $0.12`).
+- **Spend & Savings Tracking**: Displays your current daily spend and total prevented savings in the status bar:
+  `$(shield) Today: $4.21 • Saved: $18.40`
+- **Breakdown QuickPanel**: Click the Status Bar item to open a detailed dropdown overview displaying Daily Budget limits, prevented runaway costs, optimized prompt savings, workspace attribution summaries, and model/provider cost breakdowns.
 
 ### Installation
 1. Pack the extension locally:

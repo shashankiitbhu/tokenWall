@@ -101,6 +101,59 @@ class DBManager {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(session_id) REFERENCES sessions(id)
       );
+
+      CREATE TABLE IF NOT EXISTS savings_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        request_id TEXT,
+        saving_type TEXT NOT NULL CHECK(saving_type IN ('block_runaway', 'block_budget', 'switch_model', 'optimize_prompt')),
+        amount REAL NOT NULL,
+        saved_tokens INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS tool_call_usage (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        input_length INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(request_id) REFERENCES requests(id)
+      );
+
+      CREATE VIEW IF NOT EXISTS workspace_usage AS
+      SELECT 
+        p.id as project_id, 
+        p.name as project_name, 
+        p.path as project_path,
+        COALESCE(SUM(r.cost), 0) as total_spend
+      FROM projects p
+      LEFT JOIN sessions s ON s.project_id = p.id
+      LEFT JOIN requests r ON r.session_id = s.id
+      GROUP BY p.id;
+
+      CREATE VIEW IF NOT EXISTS provider_usage AS
+      SELECT 
+        provider, 
+        COALESCE(SUM(cost), 0) as total_spend, 
+        COUNT(*) as request_count 
+      FROM requests 
+      GROUP BY provider;
+
+      CREATE VIEW IF NOT EXISTS model_usage AS
+      SELECT 
+        model, 
+        COALESCE(SUM(cost), 0) as total_spend, 
+        COUNT(*) as request_count 
+      FROM requests 
+      GROUP BY model;
+
+      CREATE VIEW IF NOT EXISTS spend_summary AS
+      SELECT 
+        COALESCE(SUM(cost), 0) as total_spend, 
+        COALESCE(SUM(optimized_tokens_saved), 0) as total_tokens_saved 
+      FROM requests;
     `);
         this.runMigrations();
     }
@@ -274,6 +327,45 @@ class DBManager {
             }
         });
         txn();
+    }
+    // Savings and tool calls helpers
+    logSavingsEvent(event) {
+        this.db.prepare(`
+      INSERT INTO savings_events (id, session_id, request_id, saving_type, amount, saved_tokens)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(event.id, event.sessionId, event.requestId, event.type, event.amount, event.tokens);
+    }
+    logToolCall(id, requestId, toolName, inputLength = 0) {
+        this.db.prepare(`
+      INSERT INTO tool_call_usage (id, request_id, tool_name, input_length)
+      VALUES (?, ?, ?, ?)
+    `).run(id, requestId, toolName, inputLength);
+    }
+    getWorkspaceUsage() {
+        return this.db.prepare('SELECT * FROM workspace_usage').all();
+    }
+    getProviderUsage() {
+        return this.db.prepare('SELECT * FROM provider_usage').all();
+    }
+    getModelUsage() {
+        return this.db.prepare('SELECT * FROM model_usage').all();
+    }
+    getSavingsSummary(sessionId) {
+        let preventedStmt;
+        let optimizedStmt;
+        if (sessionId) {
+            preventedStmt = this.db.prepare("SELECT COALESCE(SUM(amount), 0) as amt FROM savings_events WHERE session_id = ? AND saving_type IN ('block_runaway', 'block_budget')").get(sessionId);
+            optimizedStmt = this.db.prepare("SELECT COALESCE(SUM(amount), 0) as amt, COALESCE(SUM(saved_tokens), 0) as tokens FROM savings_events WHERE session_id = ? AND saving_type IN ('optimize_prompt', 'switch_model')").get(sessionId);
+        }
+        else {
+            preventedStmt = this.db.prepare("SELECT COALESCE(SUM(amount), 0) as amt FROM savings_events WHERE saving_type IN ('block_runaway', 'block_budget')").get();
+            optimizedStmt = this.db.prepare("SELECT COALESCE(SUM(amount), 0) as amt, COALESCE(SUM(saved_tokens), 0) as tokens FROM savings_events WHERE saving_type IN ('optimize_prompt', 'switch_model')").get();
+        }
+        return {
+            preventedSpend: preventedStmt?.amt || 0,
+            optimizedSavings: optimizedStmt?.amt || 0,
+            savedTokens: optimizedStmt?.tokens || 0
+        };
     }
     close() {
         this.db.close();

@@ -79,5 +79,22 @@ export declare class DBManager {
     };
     reconcileBudget(requestId: string, finalCost: number, finalStatus: 'success' | 'failed' | 'blocked', finalState: 'reconciled' | 'cancelled' | 'failed'): void;
     reconcileStaleReservations(): void;
+    logSavingsEvent(event: {
+        id: string;
+        sessionId: string;
+        requestId: string | null;
+        type: string;
+        amount: number;
+        tokens: number;
+    }): void;
+    logToolCall(id: string, requestId: string, toolName: string, inputLength?: number): void;
+    getWorkspaceUsage(): any[];
+    getProviderUsage(): any[];
+    getModelUsage(): any[];
+    getSavingsSummary(sessionId?: string): {
+        preventedSpend: number;
+        optimizedSavings: number;
+        savedTokens: number;
+    };
     close(): void;
 }
