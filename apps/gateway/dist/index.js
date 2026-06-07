@@ -308,7 +308,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (action === 'cancel') {
         telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
-        return sendBlockedResponse(reply, provider, 403, 'Request cancelled by user in TokenWall.', 'cancelled_by_user', 'forbidden');
+        return sendBlockedResponse(reply, provider, 400, 'Request cancelled by user in TokenWall.', 'invalid_request_error', 'forbidden');
     }
     let finalRequestBody = request.body;
     let finalRequest = parsedRequest;
@@ -539,7 +539,7 @@ function sendBlockedResponse(reply, provider, statusCode, message, errorType, er
         return reply.status(statusCode).send({
             type: 'error',
             error: {
-                type: errorType === 'runaway_loop_detected' ? 'invalid_request_error' : 'permission_error',
+                type: (errorType === 'runaway_loop_detected' || errorType === 'invalid_request_error') ? 'invalid_request_error' : 'permission_error',
                 message: `TokenWall blocked request: ${message}`
             }
         });

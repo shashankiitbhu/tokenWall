@@ -368,9 +368,9 @@ async function handleInterception(
     return sendBlockedResponse(
       reply,
       provider,
-      403,
+      400,
       'Request cancelled by user in TokenWall.',
-      'cancelled_by_user',
+      'invalid_request_error',
       'forbidden'
     );
   }
@@ -631,7 +631,7 @@ function sendBlockedResponse(
     return reply.status(statusCode).send({
       type: 'error',
       error: {
-        type: errorType === 'runaway_loop_detected' ? 'invalid_request_error' : 'permission_error',
+        type: (errorType === 'runaway_loop_detected' || errorType === 'invalid_request_error') ? 'invalid_request_error' : 'permission_error',
         message: `TokenWall blocked request: ${message}`
       }
     });
