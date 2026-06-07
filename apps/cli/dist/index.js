@@ -11,6 +11,14 @@ const args = process.argv.slice(2);
 const command = args[0];
 const db = new core_1.DBManager();
 const configManager = new core_1.ConfigManager();
+function getGatewayPath() {
+    try {
+        return require.resolve('@tokenwall/gateway');
+    }
+    catch {
+        return path_1.default.resolve(__dirname, '../../gateway/dist/index.js');
+    }
+}
 function showHelp() {
     console.log(`
 ${cBold(cGreen('TokenWall'))} - AI Spend Prevention & Budget Governance Platform
@@ -45,7 +53,7 @@ async function main() {
         const isHeadless = args.includes('--headless');
         console.log(cBold(cCyan('Starting TokenWall gateway...')));
         // Launch gateway server in-process by executing the gateway file
-        const gatewayPath = path_1.default.resolve(__dirname, '../../gateway/dist/index.js');
+        const gatewayPath = getGatewayPath();
         const gatewayProc = (0, child_process_1.spawn)('node', [gatewayPath], {
             stdio: 'inherit',
             env: { ...process.env, TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }
@@ -153,7 +161,7 @@ async function main() {
         console.log(cBold(cGreen('Initializing TokenWall Interception Wrapper...')));
         // 1. Spin up the gateway server locally in the background
         const isHeadless = args.includes('--headless');
-        const gatewayPath = path_1.default.resolve(__dirname, '../../gateway/dist/index.js');
+        const gatewayPath = getGatewayPath();
         const gatewayServer = (0, child_process_1.spawn)('node', [gatewayPath], {
             stdio: 'ignore', // Do not inherit stdio, prevent TTY collisions
             env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: isHeadless ? 'true' : 'false' }

@@ -11,6 +11,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@tokenwall/core": "file:../../packages/core"
+    "@tokenwall/core": "file:../../packages/core",
+    "@tokenwall/gateway": "file:../gateway"
   }
 }
