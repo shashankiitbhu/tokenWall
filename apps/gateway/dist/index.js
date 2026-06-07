@@ -147,13 +147,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         });
         terminal_ui_1.TerminalUI.drawBlockedAlert(loopCheck.reason || 'Runaway loop detected');
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'failed'); // using generated requestId instead of dummy
-        return reply.status(429).send({
-            error: {
-                message: `TokenWall blocked request: ${loopCheck.reason}`,
-                type: 'runaway_loop_detected',
-                code: 'too_many_requests'
-            }
-        });
+        return sendBlockedResponse(reply, provider, 400, loopCheck.reason || 'Runaway loop detected', 'runaway_loop_detected', 'too_many_requests');
     }
     // Run budget evaluation (Transactional Reservation)
     const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
@@ -176,13 +170,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
             tokens: estimation.estimatedInputTokens + estimation.estimatedOutputTokens
         });
         terminal_ui_1.TerminalUI.drawBlockedAlert(budgetCheck.blockedReason || 'Budget Exceeded');
-        return reply.status(402).send({
-            error: {
-                message: `TokenWall blocked request: ${budgetCheck.blockedReason}`,
-                type: 'budget_exceeded',
-                code: 'payment_required'
-            }
-        });
+        return sendBlockedResponse(reply, provider, 403, budgetCheck.blockedReason || 'Budget Exceeded', 'budget_exceeded', 'payment_required');
     }
     else {
         telemetryLogger.emitEvent({
@@ -261,12 +249,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (action === 'cancel') {
         telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
-        return reply.status(402).send({
-            error: {
-                message: 'Request cancelled by user in TokenWall.',
-                type: 'cancelled_by_user'
-            }
-        });
+        return sendBlockedResponse(reply, provider, 403, 'Request cancelled by user in TokenWall.', 'cancelled_by_user', 'forbidden');
     }
     let finalRequestBody = request.body;
     let finalRequest = parsedRequest;
@@ -495,6 +478,36 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         return reply.status(500).send({ error: { message: error.message } });
     }
+}
+function sendBlockedResponse(reply, provider, statusCode, message, errorType, errorCode) {
+    // Notify the VS Code extension control plane
+    control_plane_js_1.controlPlane.sendNotification(`TokenWall Blocked: ${message}`, statusCode >= 429 ? 'warning' : 'error');
+    if (provider === 'anthropic') {
+        return reply.status(statusCode).send({
+            type: 'error',
+            error: {
+                type: errorType === 'runaway_loop_detected' ? 'invalid_request_error' : 'permission_error',
+                message: `TokenWall blocked request: ${message}`
+            }
+        });
+    }
+    if (provider === 'gemini') {
+        return reply.status(statusCode).send({
+            error: {
+                code: statusCode,
+                message: `TokenWall blocked request: ${message}`,
+                status: errorType === 'runaway_loop_detected' ? 'RESOURCE_EXHAUSTED' : 'PERMISSION_DENIED'
+            }
+        });
+    }
+    // Default to OpenAI format
+    return reply.status(statusCode).send({
+        error: {
+            message: `TokenWall blocked request: ${message}`,
+            type: errorType,
+            code: errorCode
+        }
+    });
 }
 // Start gateway server
 server.listen({ port: PORT, host: '127.0.0.1' }, (err, address) => {

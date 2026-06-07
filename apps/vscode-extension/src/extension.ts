@@ -54,6 +54,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Perform initial config sync
   syncSettingsToConfigFile();
+
+  // Auto-detect and configure other popular AI extensions
+  autoConfigureAIExtensions().catch(console.error);
 }
 
 export function deactivate() {
@@ -219,6 +222,15 @@ function connectControlPlane(context: vscode.ExtensionContext) {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'approval_pending') {
         await handlePendingApproval(msg.payload);
+      } else if (msg.type === 'notification') {
+        const { message, style } = msg.payload;
+        if (style === 'error') {
+          vscode.window.showErrorMessage(message);
+        } else if (style === 'warning') {
+          vscode.window.showWarningMessage(message);
+        } else {
+          vscode.window.showInformationMessage(message);
+        }
       }
     } catch (e) {
       console.error('Failed to parse websocket message', e);
@@ -478,3 +490,68 @@ function syncSettingsToConfigFile() {
     console.error('Error synchronizing TokenWall configuration settings', err);
   }
 }
+
+async function autoConfigureAIExtensions() {
+  const extensions = vscode.extensions.all;
+  
+  // 1. Check for Cline
+  const clineExt = extensions.find(e => e.id === 'saoudrizwan.claude-dev');
+  if (clineExt) {
+    const config = vscode.workspace.getConfiguration('cline');
+    const provider = config.get<string>('apiProvider');
+    if (provider !== 'custom') {
+      const opt = await vscode.window.showInformationMessage(
+        'TokenWall detected the Cline extension. Enable automatic spend protection and loop blocking for Cline?',
+        'Enable Protection',
+        'No'
+      );
+      if (opt === 'Enable Protection') {
+        await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
+        await config.update('apiEndpoint', 'http://localhost:1984/v1', vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage('TokenWall spend protection enabled for Cline!');
+      }
+    }
+  }
+
+  // 2. Check for Roo Cline
+  const rooClineExt = extensions.find(e => e.id === 'RooVeterinaryInc.roo-cline');
+  if (rooClineExt) {
+    const config = vscode.workspace.getConfiguration('roo-cline');
+    const provider = config.get<string>('apiProvider');
+    if (provider !== 'custom') {
+      const opt = await vscode.window.showInformationMessage(
+        'TokenWall detected the Roo Cline extension. Enable automatic spend protection and loop blocking for Roo Cline?',
+        'Enable Protection',
+        'No'
+      );
+      if (opt === 'Enable Protection') {
+        await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
+        await config.update('apiEndpoint', 'http://localhost:1984/v1', vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage('TokenWall spend protection enabled for Roo Cline!');
+      }
+    }
+  }
+
+  // 3. Check for Claude Code extension
+  const claudeCodeExt = extensions.find(e => e.id === 'anthropic.claude-code' || e.id.includes('claude-code'));
+  if (claudeCodeExt) {
+    const config = vscode.workspace.getConfiguration('claude-code');
+    let envVars = config.get<Array<{ name: string; value: string }>>('environmentVariables') || [];
+    const hasBaseUrl = envVars.some(v => v.name === 'ANTHROPIC_BASE_URL');
+    
+    if (!hasBaseUrl) {
+      const opt = await vscode.window.showInformationMessage(
+        'TokenWall detected the Claude Code extension. Enable automatic spend protection and loop blocking for Claude Code?',
+        'Enable Protection',
+        'No'
+      );
+      if (opt === 'Enable Protection') {
+        const updatedEnvVars = [...envVars];
+        updatedEnvVars.push({ name: 'ANTHROPIC_BASE_URL', value: 'http://localhost:1984' });
+        await config.update('environmentVariables', updatedEnvVars, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage('TokenWall spend protection enabled for Claude Code!');
+      }
+    }
+  }
+}
+

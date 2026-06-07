@@ -81,6 +81,13 @@ export class ControlPlane {
     });
   }
 
+  sendNotification(message: string, style: 'info' | 'warning' | 'error' = 'info') {
+    this.broadcast({
+      type: 'notification',
+      payload: { message, style }
+    });
+  }
+
   private broadcast(message: any) {
     const payload = JSON.stringify(message);
     for (const client of this.clients) {

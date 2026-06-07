@@ -25,10 +25,21 @@ export class RunawayLoopDetector {
       input_tokens: number;
       output_tokens: number;
       status: string;
+      created_at: string;
     }>;
 
     if (recentRequests.length < 3) {
       return { loopDetected: false };
+    }
+
+    // Reset loop detection if the last request was more than 60 seconds ago (quiet period threshold)
+    if (recentRequests.length > 0) {
+      const lastRequestTime = new Date(recentRequests[0].created_at + ' UTC').getTime();
+      const currentTime = Date.now();
+      const secondsSinceLastRequest = (currentTime - lastRequestTime) / 1000;
+      if (secondsSinceLastRequest > 60) {
+        return { loopDetected: false };
+      }
     }
 
     // 1. Check Context Window Velocity (token explosion)
@@ -51,17 +62,26 @@ export class RunawayLoopDetector {
     if (isExploding) {
       return {
         loopDetected: true,
-        reason: `Context window velocity alert: Input tokens are growing exponentially (from ${recentRequests[recentRequests.length - 1].input_tokens.toLocaleString()} to ${newInputTokens.toLocaleString()}). Possible runaway conversation log append loop.`
+        reason: `Loop Protection: Context window velocity alert. Input tokens are growing exponentially (from ${recentRequests[recentRequests.length - 1].input_tokens.toLocaleString()} to ${newInputTokens.toLocaleString()}), indicating a runaway conversation log append loop. (Bypass: Wait 60s for a quiet period reset, or run 'rm ~/.tokenwall/database.sqlite' to clear history).`
       };
     }
 
     // 2. Check Sequential Failures
     const lastThreeFailed = recentRequests.slice(0, 3).every(r => r.status === 'failed');
     if (lastThreeFailed) {
-      return {
-        loopDetected: true,
-        reason: 'Three consecutive requests failed or resulted in errors. Halting execution to prevent automated loops.'
-      };
+      const lastFailedReq = recentRequests[0];
+      const lastFailedTime = new Date(lastFailedReq.created_at + ' UTC').getTime();
+      const secondsSinceLastFailure = (Date.now() - lastFailedTime) / 1000;
+      
+      const isSimilarTokenSize = Math.abs(lastFailedReq.input_tokens - newInputTokens) <= 3;
+      const isRapidRetry = secondsSinceLastFailure < 15;
+      
+      if (isSimilarTokenSize && isRapidRetry) {
+        return {
+          loopDetected: true,
+          reason: 'Loop Protection: Three consecutive requests failed or resulted in errors. Halting execution to prevent automated retry loops. (Bypass: Wait 60s or change your prompt content slightly).'
+        };
+      }
     }
 
     // 3. Jaccard Prompt Similarity
@@ -75,7 +95,7 @@ export class RunawayLoopDetector {
     if (uniqueTokens.size === 1) {
       return {
         loopDetected: true,
-        reason: 'Duplicate prompt footprint detected. Multiple sequential requests have the exact same token footprint.'
+        reason: 'Loop Protection: Duplicate prompt footprint detected. Multiple sequential requests have the exact same token footprint (potential infinite retry loop). (Bypass: Wait 60s for a quiet period reset, or change your prompt content slightly).'
       };
     }
 

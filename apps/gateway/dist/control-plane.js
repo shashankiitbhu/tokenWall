@@ -62,6 +62,12 @@ class ControlPlane {
             });
         });
     }
+    sendNotification(message, style = 'info') {
+        this.broadcast({
+            type: 'notification',
+            payload: { message, style }
+        });
+    }
     broadcast(message) {
         const payload = JSON.stringify(message);
         for (const client of this.clients) {

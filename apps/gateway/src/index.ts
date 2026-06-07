@@ -169,13 +169,14 @@ async function handleInterception(
     });
     TerminalUI.drawBlockedAlert(loopCheck.reason || 'Runaway loop detected');
     telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'failed'); // using generated requestId instead of dummy
-    return reply.status(429).send({
-      error: {
-        message: `TokenWall blocked request: ${loopCheck.reason}`,
-        type: 'runaway_loop_detected',
-        code: 'too_many_requests'
-      }
-    });
+    return sendBlockedResponse(
+      reply,
+      provider,
+      400,
+      loopCheck.reason || 'Runaway loop detected',
+      'runaway_loop_detected',
+      'too_many_requests'
+    );
   }
 
   // Run budget evaluation (Transactional Reservation)
@@ -200,13 +201,14 @@ async function handleInterception(
       tokens: estimation.estimatedInputTokens + estimation.estimatedOutputTokens
     });
     TerminalUI.drawBlockedAlert(budgetCheck.blockedReason || 'Budget Exceeded');
-    return reply.status(402).send({
-      error: {
-        message: `TokenWall blocked request: ${budgetCheck.blockedReason}`,
-        type: 'budget_exceeded',
-        code: 'payment_required'
-      }
-    });
+    return sendBlockedResponse(
+      reply,
+      provider,
+      403,
+      budgetCheck.blockedReason || 'Budget Exceeded',
+      'budget_exceeded',
+      'payment_required'
+    );
   } else {
     telemetryLogger.emitEvent({
       eventType: 'reservation_created',
@@ -284,12 +286,14 @@ async function handleInterception(
   if (action === 'cancel') {
     telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
     telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
-    return reply.status(402).send({
-      error: {
-        message: 'Request cancelled by user in TokenWall.',
-        type: 'cancelled_by_user'
-      }
-    });
+    return sendBlockedResponse(
+      reply,
+      provider,
+      403,
+      'Request cancelled by user in TokenWall.',
+      'cancelled_by_user',
+      'forbidden'
+    );
   }
 
   let finalRequestBody = request.body;
@@ -538,6 +542,47 @@ async function handleInterception(
     }
     return reply.status(500).send({ error: { message: error.message } });
   }
+}
+
+function sendBlockedResponse(
+  reply: any,
+  provider: 'openai' | 'anthropic' | 'gemini',
+  statusCode: number,
+  message: string,
+  errorType: string,
+  errorCode: string
+) {
+  // Notify the VS Code extension control plane
+  controlPlane.sendNotification(`TokenWall Blocked: ${message}`, statusCode >= 429 ? 'warning' : 'error');
+
+  if (provider === 'anthropic') {
+    return reply.status(statusCode).send({
+      type: 'error',
+      error: {
+        type: errorType === 'runaway_loop_detected' ? 'invalid_request_error' : 'permission_error',
+        message: `TokenWall blocked request: ${message}`
+      }
+    });
+  }
+
+  if (provider === 'gemini') {
+    return reply.status(statusCode).send({
+      error: {
+        code: statusCode,
+        message: `TokenWall blocked request: ${message}`,
+        status: errorType === 'runaway_loop_detected' ? 'RESOURCE_EXHAUSTED' : 'PERMISSION_DENIED'
+      }
+    });
+  }
+
+  // Default to OpenAI format
+  return reply.status(statusCode).send({
+    error: {
+      message: `TokenWall blocked request: ${message}`,
+      type: errorType,
+      code: errorCode
+    }
+  });
 }
 
 // Start gateway server
