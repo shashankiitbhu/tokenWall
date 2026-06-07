@@ -13,6 +13,7 @@ const routing_engine_1 = require("@tokenwall/routing-engine");
 const prompt_optimizer_1 = require("@tokenwall/prompt-optimizer");
 const telemetry_1 = require("@tokenwall/telemetry");
 const terminal_ui_1 = require("@tokenwall/terminal-ui");
+const eventsource_parser_1 = require("eventsource-parser");
 const server = (0, fastify_1.default)({ logger: false });
 const db = new core_1.DBManager();
 const configManager = new core_1.ConfigManager();
@@ -65,7 +66,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     const loopCheck = loopDetector.detect(sessionId, firstUserMsg ? firstUserMsg.content : '', estimation.estimatedInputTokens);
     if (loopCheck.loopDetected) {
         terminal_ui_1.TerminalUI.drawBlockedAlert(loopCheck.reason || 'Runaway loop detected');
-        telemetryLogger.logRequest(sessionId, parsedRequest, null, 0, 0, 'blocked');
+        telemetryLogger.reconcileRequest('dummy', 0, 'blocked', 'failed');
         return reply.status(429).send({
             error: {
                 message: `TokenWall blocked request: ${loopCheck.reason}`,
@@ -74,11 +75,14 @@ async function handleInterception(provider, targetUrl, request, reply) {
             }
         });
     }
-    // Run budget evaluation
-    const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, estimation.estimatedCost);
+    // Generate Request ID
+    const requestId = Math.random().toString(36).substring(2, 11);
+    // Run budget evaluation (Transactional Reservation)
+    const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
     if (!budgetCheck.allowed) {
         terminal_ui_1.TerminalUI.drawBlockedAlert(budgetCheck.blockedReason || 'Budget Exceeded');
-        telemetryLogger.logRequest(sessionId, parsedRequest, null, 0, 0, 'blocked');
+        // It was never reserved, so no reconciliation needed for the reservation itself, but we can log it.
+        // Actually evaluate() reserves if allowed, but rejects if not. So no reservation exists.
         return reply.status(402).send({
             error: {
                 message: `TokenWall blocked request: ${budgetCheck.blockedReason}`,
@@ -89,24 +93,12 @@ async function handleInterception(provider, targetUrl, request, reply) {
     }
     // Determine if we show interactive warning
     let action = 'approve';
-    const currentSessionSpend = db.getSessionSpend(sessionId);
-    const dailySpend = db.getBudgets(projectId).find(b => b.period === 'daily')?.current_spend || 0.0;
-    const dailyLimit = configManager.getConfig().dailyLimit;
-    // Prompt threshold (default prompt on cost >= $0.05 or warnings present)
     const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0;
     if (needsWarning) {
-        terminal_ui_1.TerminalUI.drawSessionStatus(currentSessionSpend, dailySpend, dailyLimit);
-        terminal_ui_1.TerminalUI.drawPreFlightReport({
-            model: parsedRequest.model,
-            estimation,
-            contextReport,
-            routing: routingRecommendation,
-            optimization
-        });
-        action = await terminal_ui_1.TerminalUI.askApproval();
+        action = await terminal_ui_1.TerminalUI.askApproval(estimation.estimatedCost.toFixed(4), parsedRequest.model);
     }
     if (action === 'cancel') {
-        telemetryLogger.logRequest(sessionId, parsedRequest, null, 0, 0, 'blocked');
+        telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
         return reply.status(402).send({
             error: {
                 message: 'Request cancelled by user in TokenWall.',
@@ -161,6 +153,13 @@ async function handleInterception(provider, targetUrl, request, reply) {
         finalRequest = { ...parsedRequest, model: recommendedModel };
         console.log(terminal_ui_1.c.green(`✔ Switched model to: ${recommendedModel}`));
     }
+    // Mutate OpenAI Request to include stream_options if streaming
+    if (provider === 'openai' && parsedRequest.stream) {
+        finalRequestBody = {
+            ...finalRequestBody,
+            stream_options: { include_usage: true }
+        };
+    }
     // Forward request headers
     const forwardHeaders = {};
     for (const [key, value] of Object.entries(request.headers)) {
@@ -169,6 +168,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
     }
     // Forward payload to destination API
+    let streamReconciled = false;
     try {
         const response = await fetch(targetUrl, {
             method: 'POST',
@@ -177,13 +177,8 @@ async function handleInterception(provider, targetUrl, request, reply) {
         });
         if (!response.ok) {
             const errorText = await response.text();
-            const normalizedRes = {
-                id: 'error',
-                model: finalRequest.model,
-                content: '',
-                usage: { inputTokens: 0, outputTokens: 0 }
-            };
-            telemetryLogger.logRequest(sessionId, finalRequest, normalizedRes, 0.0, savedTokens, 'failed');
+            telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'failed');
+            streamReconciled = true;
             return reply.status(response.status).send(errorText);
         }
         // Set response headers
@@ -197,7 +192,9 @@ async function handleInterception(provider, targetUrl, request, reply) {
             const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
             const totalCost = ((normalizedRes.usage.inputTokens / 1000000) * pricing.inputPerMillion) +
                 ((normalizedRes.usage.outputTokens / 1000000) * pricing.outputPerMillion);
-            telemetryLogger.logRequest(sessionId, finalRequest, normalizedRes, totalCost, savedTokens, 'success');
+            db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens);
+            telemetryLogger.reconcileRequest(requestId, totalCost, 'success', 'reconciled');
+            streamReconciled = true;
             return reply.send(resBody);
         }
         // Streaming Response proxy
@@ -211,9 +208,20 @@ async function handleInterception(provider, targetUrl, request, reply) {
         let inputAccumulated = 0;
         let outputAccumulated = 0;
         const decoder = new TextDecoder();
-        let textBuffer = '';
         const stream = new ReadableStream({
             async start(controller) {
+                // Robust SSE Parser
+                const parser = (0, eventsource_parser_1.createParser)({
+                    onEvent: (event) => {
+                        const parsedChunk = providers_1.ProviderRegistry.parseStreamChunk(provider, event.data);
+                        if (parsedChunk && parsedChunk.usage) {
+                            if (parsedChunk.usage.inputTokens > 0)
+                                inputAccumulated = parsedChunk.usage.inputTokens;
+                            if (parsedChunk.usage.outputTokens > 0)
+                                outputAccumulated = parsedChunk.usage.outputTokens;
+                        }
+                    }
+                });
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
@@ -222,26 +230,15 @@ async function handleInterception(provider, targetUrl, request, reply) {
                             break;
                         }
                         controller.enqueue(value);
-                        // Parse chunk for token metrics
                         const chunkText = decoder.decode(value, { stream: true });
-                        textBuffer += chunkText;
-                        // Split buffer into lines to parse server-sent events
-                        const lines = textBuffer.split('\n');
-                        textBuffer = lines.pop() || ''; // Keep the last partial line
-                        for (const line of lines) {
-                            const cleaned = line.trim();
-                            if (!cleaned)
-                                continue;
-                            const parsedChunk = providers_1.ProviderRegistry.parseStreamChunk(provider, cleaned);
-                            if (parsedChunk && parsedChunk.usage) {
-                                if (parsedChunk.usage.inputTokens > 0)
-                                    inputAccumulated = parsedChunk.usage.inputTokens;
-                                if (parsedChunk.usage.outputTokens > 0)
-                                    outputAccumulated = parsedChunk.usage.outputTokens;
-                            }
-                        }
+                        parser.feed(chunkText);
                     }
-                    // If provider stream didn't provide final tokens, estimate based on final output text
+                }
+                catch (err) {
+                    controller.error(err);
+                }
+                finally {
+                    // Stream ended, cancelled, or errored: Reconcile!
                     if (inputAccumulated === 0)
                         inputAccumulated = estimation.estimatedInputTokens;
                     if (outputAccumulated === 0)
@@ -249,26 +246,22 @@ async function handleInterception(provider, targetUrl, request, reply) {
                     const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
                     const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
                         ((outputAccumulated / 1000000) * pricing.outputPerMillion);
-                    const finalRes = {
-                        id: 'stream',
-                        model: finalRequest.model,
-                        content: '',
-                        usage: {
-                            inputTokens: inputAccumulated,
-                            outputTokens: outputAccumulated
-                        }
-                    };
-                    telemetryLogger.logRequest(sessionId, finalRequest, finalRes, finalCost, savedTokens, 'success');
+                    db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
+                    telemetryLogger.reconcileRequest(requestId, finalCost, 'success', 'reconciled');
+                    streamReconciled = true;
                 }
-                catch (err) {
-                    controller.error(err);
-                }
+            },
+            cancel() {
+                reader.cancel();
             }
         });
         return reply.send(stream);
     }
     catch (error) {
         console.error('Error forwarding request:', error);
+        if (!streamReconciled) {
+            telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');
+        }
         return reply.status(500).send({ error: { message: error.message } });
     }
 }
@@ -278,5 +271,7 @@ server.listen({ port: PORT, host: '127.0.0.1' }, (err, address) => {
         console.error(err);
         process.exit(1);
     }
+    // Reconcile any stale reservations from previous crashes
+    db.reconcileStaleReservations();
     terminal_ui_1.TerminalUI.drawGatewayStartup(PORT);
 });

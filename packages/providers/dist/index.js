@@ -114,9 +114,7 @@ class ProviderRegistry {
     static parseStreamChunk(provider, chunkText) {
         try {
             if (provider === 'openai') {
-                if (!chunkText.startsWith('data: '))
-                    return null;
-                const jsonStr = chunkText.slice(6).trim();
+                const jsonStr = chunkText.trim();
                 if (jsonStr === '[DONE]')
                     return null;
                 const parsed = JSON.parse(jsonStr);
@@ -128,9 +126,7 @@ class ProviderRegistry {
                 return { text, usage };
             }
             if (provider === 'anthropic') {
-                if (!chunkText.startsWith('data: '))
-                    return null;
-                const jsonStr = chunkText.slice(6).trim();
+                const jsonStr = chunkText.trim();
                 const parsed = JSON.parse(jsonStr);
                 let text = '';
                 let usage;

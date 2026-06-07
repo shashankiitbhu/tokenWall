@@ -22,63 +22,20 @@ class BudgetEvaluator {
         this.db = db;
         this.config = config;
     }
-    evaluate(projectId, sessionId, estimatedCost) {
+    evaluate(projectId, sessionId, requestId, estimatedCost, provider = 'unknown', model = 'unknown') {
         const configSettings = this.config.getConfig();
         const warnings = [];
-        let allowed = true;
-        let blockedReason;
-        let warnOnly = false;
-        // Get current spent on this session
-        const sessionSpend = this.db.getSessionSpend(sessionId);
-        const totalSessionExpected = sessionSpend + estimatedCost;
-        // Retrieve budgets from SQLite
         let dbBudgets = this.db.getBudgets(projectId);
-        // If SQLite budgets are empty, initialize them from config properties
         if (dbBudgets.length === 0) {
             this.initDefaultBudgets(projectId);
-            dbBudgets = this.db.getBudgets(projectId);
         }
-        // Evaluate budgets (Session, Daily, Monthly)
-        for (const budget of dbBudgets) {
-            let limit = budget.limit_amount;
-            let current = budget.current_spend;
-            const isHard = budget.hard_limit === 1;
-            // For session period, compare against sessionSpend
-            if (budget.period === 'session') {
-                if (totalSessionExpected > limit) {
-                    const message = `Session spend limit exceeded ($${totalSessionExpected.toFixed(2)} / $${limit.toFixed(2)}).`;
-                    if (isHard && configSettings.hardLimitsEnabled) {
-                        allowed = false;
-                        blockedReason = message;
-                    }
-                    else {
-                        warnOnly = true;
-                        warnings.push(message);
-                    }
-                }
-            }
-            else {
-                // Daily / Monthly / Project
-                const expectedSpend = current + estimatedCost;
-                if (expectedSpend > limit) {
-                    const message = `${budget.period.toUpperCase()} limit exceeded ($${expectedSpend.toFixed(2)} / $${limit.toFixed(2)}).`;
-                    if (isHard && configSettings.hardLimitsEnabled) {
-                        allowed = false;
-                        blockedReason = message;
-                    }
-                    else {
-                        warnOnly = true;
-                        warnings.push(message);
-                    }
-                }
-            }
-        }
+        const reservation = this.db.reserveBudget(projectId, sessionId, requestId, estimatedCost, provider, model);
         return {
-            allowed,
-            blockedReason,
-            warnOnly,
-            warnings,
-            currentSessionSpend: sessionSpend
+            allowed: reservation.allowed,
+            blockedReason: reservation.reason,
+            warnOnly: false,
+            warnings: [],
+            currentSessionSpend: this.db.getSessionSpend(sessionId)
         };
     }
     initDefaultBudgets(projectId) {

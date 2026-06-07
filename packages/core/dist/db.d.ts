@@ -29,6 +29,7 @@ export interface RequestLog {
     cost: number;
     optimized_tokens_saved: number;
     status: 'success' | 'failed' | 'blocked';
+    state: 'pending' | 'streaming' | 'completed' | 'failed' | 'cancelled' | 'reconciled';
     created_at: string;
 }
 export declare class DBManager {
@@ -44,6 +45,7 @@ export declare class DBManager {
     };
     private getDefaultDBPath;
     private initSchema;
+    private runMigrations;
     getOrCreateProject(name: string, dirPath: string): Project;
     getBudgets(projectId: string | null): Budget[];
     createOrUpdateBudget(budget: Omit<Budget, 'current_spend'>): void;
@@ -53,5 +55,12 @@ export declare class DBManager {
     getSession(id: string): Session | undefined;
     getSessionSpend(sessionId: string): number;
     logRequest(log: Omit<RequestLog, 'created_at'>): void;
+    updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number): void;
+    reserveBudget(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string): {
+        allowed: boolean;
+        reason?: string;
+    };
+    reconcileBudget(requestId: string, finalCost: number, finalStatus: 'success' | 'failed' | 'blocked', finalState: 'reconciled' | 'cancelled' | 'failed'): void;
+    reconcileStaleReservations(): void;
     close(): void;
 }

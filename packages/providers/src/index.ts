@@ -145,8 +145,7 @@ export class ProviderRegistry {
   static parseStreamChunk(provider: 'openai' | 'anthropic' | 'gemini', chunkText: string): { text: string; usage?: { inputTokens: number; outputTokens: number } } | null {
     try {
       if (provider === 'openai') {
-        if (!chunkText.startsWith('data: ')) return null;
-        const jsonStr = chunkText.slice(6).trim();
+        const jsonStr = chunkText.trim();
         if (jsonStr === '[DONE]') return null;
         const parsed = JSON.parse(jsonStr);
         const text = parsed.choices?.[0]?.delta?.content || '';
@@ -158,8 +157,7 @@ export class ProviderRegistry {
       }
 
       if (provider === 'anthropic') {
-        if (!chunkText.startsWith('data: ')) return null;
-        const jsonStr = chunkText.slice(6).trim();
+        const jsonStr = chunkText.trim();
         const parsed = JSON.parse(jsonStr);
         
         let text = '';

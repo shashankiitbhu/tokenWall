@@ -73,10 +73,31 @@ class DBManager {
         cost REAL NOT NULL,
         optimized_tokens_saved INTEGER DEFAULT 0,
         status TEXT CHECK(status IN ('success', 'failed', 'blocked')),
+        state TEXT DEFAULT 'completed' CHECK(state IN ('pending', 'streaming', 'completed', 'failed', 'cancelled', 'reconciled')),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(session_id) REFERENCES sessions(id)
       );
+
+      CREATE TABLE IF NOT EXISTS reservations (
+        id TEXT PRIMARY KEY,
+        request_id TEXT UNIQUE NOT NULL,
+        project_id TEXT,
+        session_id TEXT NOT NULL,
+        amount REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(request_id) REFERENCES requests(id),
+        FOREIGN KEY(session_id) REFERENCES sessions(id)
+      );
     `);
+        this.runMigrations();
+    }
+    runMigrations() {
+        try {
+            this.db.exec("ALTER TABLE requests ADD COLUMN state TEXT DEFAULT 'completed' CHECK(state IN ('pending', 'streaming', 'completed', 'failed', 'cancelled', 'reconciled'));");
+        }
+        catch (e) {
+            // Column might already exist
+        }
     }
     // Projects
     getOrCreateProject(name, dirPath) {
@@ -129,9 +150,82 @@ class DBManager {
     // Requests
     logRequest(log) {
         this.db.prepare(`
-      INSERT INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, optimized_tokens_saved, status)
-      VALUES (@id, @session_id, @provider, @model, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status)
+      INSERT INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, optimized_tokens_saved, status, state)
+      VALUES (@id, @session_id, @provider, @model, @input_tokens, @output_tokens, @cost, @optimized_tokens_saved, @status, @state)
     `).run(log);
+    }
+    updateRequestTokens(requestId, inputTokens, outputTokens) {
+        this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, requestId);
+    }
+    reserveBudget(projectId, sessionId, requestId, estimatedCost, provider = 'unknown', model = 'unknown') {
+        const txn = this.db.transaction(() => {
+            let budgets = [];
+            if (projectId) {
+                budgets = this.db.prepare('SELECT * FROM budgets WHERE project_id = ? OR project_id IS NULL').all(projectId);
+            }
+            else {
+                budgets = this.db.prepare('SELECT * FROM budgets WHERE project_id IS NULL').all();
+            }
+            for (const budget of budgets) {
+                let pendingStmt;
+                if (budget.project_id) {
+                    pendingStmt = this.db.prepare('SELECT SUM(amount) as pending FROM reservations WHERE project_id = ?').get(budget.project_id);
+                }
+                else {
+                    pendingStmt = this.db.prepare('SELECT SUM(amount) as pending FROM reservations WHERE project_id IS NULL').get();
+                }
+                const pendingAmount = pendingStmt.pending || 0;
+                const totalProjected = budget.current_spend + pendingAmount + estimatedCost;
+                if (budget.hard_limit && totalProjected > budget.limit_amount) {
+                    return { allowed: false, reason: `Budget Exceeded: Project/Global (${budget.period}) limit of $${budget.limit_amount} reached. Current: $${budget.current_spend}, Pending: $${pendingAmount}, Requested: $${estimatedCost}` };
+                }
+            }
+            const session = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+            if (session && session.session_budget) {
+                const sessionSpendStmt = this.db.prepare("SELECT SUM(cost) as spend FROM requests WHERE session_id = ? AND state = 'reconciled'").get(sessionId);
+                const sessionSpend = sessionSpendStmt.spend || 0;
+                const sessionPendingStmt = this.db.prepare('SELECT SUM(amount) as pending FROM reservations WHERE session_id = ?').get(sessionId);
+                const sessionPending = sessionPendingStmt.pending || 0;
+                const totalSessionProjected = sessionSpend + sessionPending + estimatedCost;
+                if (totalSessionProjected > session.session_budget) {
+                    return { allowed: false, reason: `Budget Exceeded: Session limit of $${session.session_budget} reached. Current: $${sessionSpend}, Pending: $${sessionPending}, Requested: $${estimatedCost}` };
+                }
+            }
+            this.db.prepare(`
+        INSERT INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, status, state)
+        VALUES (?, ?, ?, ?, 0, 0, 0, 'success', 'streaming')
+      `).run(requestId, sessionId, provider, model);
+            const resId = Math.random().toString(36).substring(2, 11);
+            this.db.prepare('INSERT INTO reservations (id, request_id, project_id, session_id, amount) VALUES (?, ?, ?, ?, ?)').run(resId, requestId, projectId, sessionId, estimatedCost);
+            return { allowed: true };
+        });
+        return txn();
+    }
+    reconcileBudget(requestId, finalCost, finalStatus, finalState) {
+        const txn = this.db.transaction(() => {
+            const res = this.db.prepare('SELECT * FROM reservations WHERE request_id = ?').get(requestId);
+            if (res) {
+                if (res.project_id) {
+                    this.db.prepare('UPDATE budgets SET current_spend = current_spend + ? WHERE project_id = ? OR project_id IS NULL').run(finalCost, res.project_id);
+                }
+                else {
+                    this.db.prepare('UPDATE budgets SET current_spend = current_spend + ? WHERE project_id IS NULL').run(finalCost);
+                }
+                this.db.prepare('DELETE FROM reservations WHERE id = ?').run(res.id);
+            }
+            this.db.prepare('UPDATE requests SET cost = ?, status = ?, state = ? WHERE id = ?').run(finalCost, finalStatus, finalState, requestId);
+        });
+        txn();
+    }
+    reconcileStaleReservations() {
+        const txn = this.db.transaction(() => {
+            const stales = this.db.prepare('SELECT * FROM reservations').all();
+            for (const stale of stales) {
+                this.db.prepare('DELETE FROM reservations WHERE id = ?').run(stale.id);
+                this.db.prepare("UPDATE requests SET status = 'failed', state = 'failed' WHERE id = ?").run(stale.request_id);
+            }
+        });
+        txn();
     }
     close() {
         this.db.close();

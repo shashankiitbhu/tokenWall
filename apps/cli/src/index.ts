@@ -68,7 +68,7 @@ async function main() {
     // 1. Spin up the gateway server locally in the background
     const gatewayPath = path.resolve(__dirname, '../../gateway/dist/index.js');
     const gatewayServer = spawn('node', [gatewayPath], {
-      stdio: 'inherit', // Let gateway prompt via inherit stdio if needed
+      stdio: 'ignore', // Do not inherit stdio, prevent TTY collisions
       env: { ...process.env, PORT: '1984' }
     });
 

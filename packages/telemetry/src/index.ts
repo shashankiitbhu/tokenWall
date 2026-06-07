@@ -23,37 +23,23 @@ export class TelemetryLogger {
     this.db.createSession(sessionId, projectId, budget);
   }
 
-  logRequest(
+  logRequestStart(
     sessionId: string,
     req: NormalizedRequest,
-    res: NormalizedResponse | null,
-    cost: number,
-    savedTokens: number,
-    status: 'success' | 'failed' | 'blocked'
+    requestId: string
   ) {
-    const id = Math.random().toString(36).substring(2, 11);
-    const inputTokens = res?.usage?.inputTokens || 0;
-    const outputTokens = res?.usage?.outputTokens || 0;
-    
-    // Log the request to local SQLite
-    this.db.logRequest({
-      id,
-      session_id: sessionId,
-      provider: req.provider,
-      model: req.model,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      cost,
-      optimized_tokens_saved: savedTokens,
-      status
-    });
+    // Basic log initialized by DB reserveBudget, so we just ensure DB sync if needed
+    // Actually db.reserveBudget already creates the request and reservation!
+    // We don't need to insert here, db.reserveBudget does it.
+  }
 
-    // Retrieve the active session to find the associated project ID
-    const session = this.db.getSession(sessionId);
-    const projectId = session ? session.project_id : null;
-
-    // Increment budget consumption in the database
-    this.db.incrementBudgetSpend(projectId, cost);
+  reconcileRequest(
+    requestId: string,
+    finalCost: number,
+    status: 'success' | 'failed' | 'blocked',
+    state: 'reconciled' | 'cancelled' | 'failed'
+  ) {
+    this.db.reconcileBudget(requestId, finalCost, status, state);
   }
 
   getSessionSummary(sessionId: string): SessionSummary {

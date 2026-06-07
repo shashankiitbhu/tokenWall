@@ -1,11 +1,6 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TerminalUI = exports.c = void 0;
-const promises_1 = __importDefault(require("readline/promises"));
-const process_1 = require("process");
 // ANSI terminal colors helper
 exports.c = {
     reset: (text) => `\x1b[0m${text}\x1b[0m`,
@@ -66,33 +61,27 @@ class TerminalUI {
         }
         console.log(exports.c.gray('─'.repeat(60)));
     }
-    static async askApproval() {
-        const rl = promises_1.default.createInterface({ input: process_1.stdin, output: process_1.stdout });
+    static async askApproval(costStr, model) {
+        // We use osascript to show an out-of-band native dialog so we don't pollute the terminal's stdin/stdout
+        const execSync = require('child_process').execSync;
+        const prompt = `TokenWall Budget Warning: Estimated cost is $${costStr} for ${model}. How would you like to proceed?`;
+        const script = `
+      set dialogResult to display dialog "${prompt}" buttons {"Cancel", "Switch Model", "Optimize", "Approve"} default button "Approve" with title "TokenWall Pre-Flight Check" with icon caution
+      return button returned of dialogResult
+    `;
         try {
-            console.log(exports.c.bold('\nChoose an action:'));
-            console.log(`  [${exports.c.green('y')}] Approve request and execute`);
-            console.log(`  [${exports.c.cyan('o')}] Approve with Prompt Optimization`);
-            console.log(`  [${exports.c.yellow('s')}] Switch model to cheaper recommendation`);
-            console.log(`  [${exports.c.red('n')}] Cancel request`);
-            while (true) {
-                const answer = (await rl.question(exports.c.bold('Action: '))).trim().toLowerCase();
-                if (answer === 'y' || answer === 'yes' || answer === '') {
-                    return 'approve';
-                }
-                if (answer === 'o' || answer === 'opt') {
-                    return 'optimize';
-                }
-                if (answer === 's' || answer === 'switch') {
-                    return 'switch_model';
-                }
-                if (answer === 'n' || answer === 'no' || answer === 'c') {
-                    return 'cancel';
-                }
-                console.log(exports.c.red('Invalid input. Please enter y, o, s, or n.'));
-            }
+            const result = execSync(`osascript -e '${script}'`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+            if (result === 'Approve')
+                return 'approve';
+            if (result === 'Optimize')
+                return 'optimize';
+            if (result === 'Switch Model')
+                return 'switch_model';
+            return 'cancel';
         }
-        finally {
-            rl.close();
+        catch (e) {
+            // If the user clicks cancel, osascript exits with non-zero code
+            return 'cancel';
         }
     }
     static drawBlockedAlert(reason) {

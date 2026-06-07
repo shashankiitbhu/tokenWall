@@ -80,33 +80,25 @@ export class TerminalUI {
     console.log(c.gray('─'.repeat(60)));
   }
 
-  static async askApproval(): Promise<'approve' | 'optimize' | 'switch_model' | 'cancel'> {
-    const rl = readline.createInterface({ input, output });
+  static async askApproval(costStr: string, model: string): Promise<'approve' | 'optimize' | 'switch_model' | 'cancel'> {
+    // We use osascript to show an out-of-band native dialog so we don't pollute the terminal's stdin/stdout
+    const execSync = require('child_process').execSync;
+    const prompt = `TokenWall Budget Warning: Estimated cost is $${costStr} for ${model}. How would you like to proceed?`;
+    
+    const script = `
+      set dialogResult to display dialog "${prompt}" buttons {"Cancel", "Switch Model", "Optimize", "Approve"} default button "Approve" with title "TokenWall Pre-Flight Check" with icon caution
+      return button returned of dialogResult
+    `;
+    
     try {
-      console.log(c.bold('\nChoose an action:'));
-      console.log(`  [${c.green('y')}] Approve request and execute`);
-      console.log(`  [${c.cyan('o')}] Approve with Prompt Optimization`);
-      console.log(`  [${c.yellow('s')}] Switch model to cheaper recommendation`);
-      console.log(`  [${c.red('n')}] Cancel request`);
-
-      while (true) {
-        const answer = (await rl.question(c.bold('Action: '))).trim().toLowerCase();
-        if (answer === 'y' || answer === 'yes' || answer === '') {
-          return 'approve';
-        }
-        if (answer === 'o' || answer === 'opt') {
-          return 'optimize';
-        }
-        if (answer === 's' || answer === 'switch') {
-          return 'switch_model';
-        }
-        if (answer === 'n' || answer === 'no' || answer === 'c') {
-          return 'cancel';
-        }
-        console.log(c.red('Invalid input. Please enter y, o, s, or n.'));
-      }
-    } finally {
-      rl.close();
+      const result = execSync(`osascript -e '${script}'`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+      if (result === 'Approve') return 'approve';
+      if (result === 'Optimize') return 'optimize';
+      if (result === 'Switch Model') return 'switch_model';
+      return 'cancel';
+    } catch (e) {
+      // If the user clicks cancel, osascript exits with non-zero code
+      return 'cancel';
     }
   }
 

@@ -10,7 +10,7 @@ export declare class BudgetEvaluator {
     private db;
     private config;
     constructor(db: DBManager, config: ConfigManager);
-    evaluate(projectId: string | null, sessionId: string, estimatedCost: number): BudgetCheckResult;
+    evaluate(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string): BudgetCheckResult;
     private initDefaultBudgets;
 }
 export * from './loopDetector.js';

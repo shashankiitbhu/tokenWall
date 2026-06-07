@@ -23,6 +23,6 @@ export declare class TerminalUI {
         routing: RouteRecommendation;
         optimization?: OptimizationResult;
     }): void;
-    static askApproval(): Promise<'approve' | 'optimize' | 'switch_model' | 'cancel'>;
+    static askApproval(costStr: string, model: string): Promise<'approve' | 'optimize' | 'switch_model' | 'cancel'>;
     static drawBlockedAlert(reason: string): void;
 }
