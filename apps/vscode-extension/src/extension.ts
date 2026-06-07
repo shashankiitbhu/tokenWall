@@ -15,6 +15,19 @@ let isConnected = false;
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
 
+  // Diagnostic dump of active extensions
+  try {
+    const dumpPath = '/Users/shashankkumar/Documents/tokenWall/debug_extensions.json';
+    const extInfo = vscode.extensions.all.map(e => ({
+      id: e.id,
+      displayName: e.packageJSON?.displayName || '',
+      name: e.packageJSON?.name || ''
+    }));
+    fs.writeFileSync(dumpPath, JSON.stringify(extInfo, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to dump diagnostics', e);
+  }
+
   // 1. Initialize Status Bar
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'tokenwall.showStatus';
@@ -533,9 +546,9 @@ async function autoConfigureAIExtensions() {
   }
 
   // 3. Check for Claude Code extension
-  const claudeCodeExt = extensions.find(e => e.id === 'anthropic.claude-code' || e.id.includes('claude-code'));
+  const claudeCodeExt = extensions.find(e => e.id.toLowerCase() === 'anthropic.claude-code' || e.id.toLowerCase().includes('claude-code'));
   if (claudeCodeExt) {
-    const config = vscode.workspace.getConfiguration('claude-code');
+    const config = vscode.workspace.getConfiguration('claudeCode');
     let envVars = config.get<Array<{ name: string; value: string }>>('environmentVariables') || [];
     const hasBaseUrl = envVars.some(v => v.name === 'ANTHROPIC_BASE_URL');
     

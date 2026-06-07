@@ -1,0 +1,697 @@
+[
+  {
+    "id": "TypeScriptTeam.jsts-chat-features",
+    "displayName": "JS/TS Chat Features",
+    "name": "jsts-chat-features"
+  },
+  {
+    "id": "vscode.bat",
+    "displayName": "Windows Bat Language Basics",
+    "name": "bat"
+  },
+  {
+    "id": "vscode.clojure",
+    "displayName": "Clojure Language Basics",
+    "name": "clojure"
+  },
+  {
+    "id": "vscode.coffeescript",
+    "displayName": "CoffeeScript Language Basics",
+    "name": "coffeescript"
+  },
+  {
+    "id": "vscode.configuration-editing",
+    "displayName": "Configuration Editing",
+    "name": "configuration-editing"
+  },
+  {
+    "id": "GitHub.copilot-chat",
+    "displayName": "GitHub Copilot Chat",
+    "name": "copilot-chat"
+  },
+  {
+    "id": "vscode.cpp",
+    "displayName": "C/C++ Language Basics",
+    "name": "cpp"
+  },
+  {
+    "id": "vscode.csharp",
+    "displayName": "C# Language Basics",
+    "name": "csharp"
+  },
+  {
+    "id": "vscode.css",
+    "displayName": "CSS Language Basics",
+    "name": "css"
+  },
+  {
+    "id": "vscode.css-language-features",
+    "displayName": "CSS Language Features",
+    "name": "css-language-features"
+  },
+  {
+    "id": "vscode.dart",
+    "displayName": "Dart Language Basics",
+    "name": "dart"
+  },
+  {
+    "id": "vscode.debug-auto-launch",
+    "displayName": "Node Debug Auto-attach",
+    "name": "debug-auto-launch"
+  },
+  {
+    "id": "vscode.debug-server-ready",
+    "displayName": "Server Ready Action",
+    "name": "debug-server-ready"
+  },
+  {
+    "id": "vscode.diff",
+    "displayName": "Diff Language Basics",
+    "name": "diff"
+  },
+  {
+    "id": "vscode.docker",
+    "displayName": "Docker Language Basics",
+    "name": "docker"
+  },
+  {
+    "id": "vscode.dotenv",
+    "displayName": "Dotenv Language Basics",
+    "name": "dotenv"
+  },
+  {
+    "id": "vscode.emmet",
+    "displayName": "Emmet",
+    "name": "emmet"
+  },
+  {
+    "id": "vscode.extension-editing",
+    "displayName": "Extension Authoring",
+    "name": "extension-editing"
+  },
+  {
+    "id": "vscode.fsharp",
+    "displayName": "F# Language Basics",
+    "name": "fsharp"
+  },
+  {
+    "id": "vscode.git",
+    "displayName": "Git",
+    "name": "git"
+  },
+  {
+    "id": "vscode.git-base",
+    "displayName": "Git Base",
+    "name": "git-base"
+  },
+  {
+    "id": "vscode.github",
+    "displayName": "GitHub",
+    "name": "github"
+  },
+  {
+    "id": "vscode.github-authentication",
+    "displayName": "GitHub Authentication",
+    "name": "github-authentication"
+  },
+  {
+    "id": "vscode.go",
+    "displayName": "Go Language Basics",
+    "name": "go"
+  },
+  {
+    "id": "vscode.groovy",
+    "displayName": "Groovy Language Basics",
+    "name": "groovy"
+  },
+  {
+    "id": "vscode.grunt",
+    "displayName": "Grunt support for VS Code",
+    "name": "grunt"
+  },
+  {
+    "id": "vscode.gulp",
+    "displayName": "Gulp support for VSCode",
+    "name": "gulp"
+  },
+  {
+    "id": "vscode.handlebars",
+    "displayName": "Handlebars Language Basics",
+    "name": "handlebars"
+  },
+  {
+    "id": "vscode.hlsl",
+    "displayName": "HLSL Language Basics",
+    "name": "hlsl"
+  },
+  {
+    "id": "vscode.html",
+    "displayName": "HTML Language Basics",
+    "name": "html"
+  },
+  {
+    "id": "vscode.html-language-features",
+    "displayName": "HTML Language Features",
+    "name": "html-language-features"
+  },
+  {
+    "id": "vscode.ini",
+    "displayName": "Ini Language Basics",
+    "name": "ini"
+  },
+  {
+    "id": "vscode.ipynb",
+    "displayName": ".ipynb Support",
+    "name": "ipynb"
+  },
+  {
+    "id": "vscode.jake",
+    "displayName": "Jake support for VS Code",
+    "name": "jake"
+  },
+  {
+    "id": "vscode.java",
+    "displayName": "Java Language Basics",
+    "name": "java"
+  },
+  {
+    "id": "vscode.javascript",
+    "displayName": "JavaScript Language Basics",
+    "name": "javascript"
+  },
+  {
+    "id": "vscode.json",
+    "displayName": "JSON Language Basics",
+    "name": "json"
+  },
+  {
+    "id": "vscode.json-language-features",
+    "displayName": "JSON Language Features",
+    "name": "json-language-features"
+  },
+  {
+    "id": "vscode.julia",
+    "displayName": "Julia Language Basics",
+    "name": "julia"
+  },
+  {
+    "id": "vscode.latex",
+    "displayName": "LaTeX Language Basics",
+    "name": "latex"
+  },
+  {
+    "id": "vscode.less",
+    "displayName": "Less Language Basics",
+    "name": "less"
+  },
+  {
+    "id": "vscode.log",
+    "displayName": "Log",
+    "name": "log"
+  },
+  {
+    "id": "vscode.lua",
+    "displayName": "Lua Language Basics",
+    "name": "lua"
+  },
+  {
+    "id": "vscode.make",
+    "displayName": "Make Language Basics",
+    "name": "make"
+  },
+  {
+    "id": "vscode.markdown",
+    "displayName": "Markdown Language Basics",
+    "name": "markdown"
+  },
+  {
+    "id": "vscode.markdown-language-features",
+    "displayName": "Markdown Language Features",
+    "name": "markdown-language-features"
+  },
+  {
+    "id": "vscode.markdown-math",
+    "displayName": "Markdown Math",
+    "name": "markdown-math"
+  },
+  {
+    "id": "vscode.media-preview",
+    "displayName": "Media Preview",
+    "name": "media-preview"
+  },
+  {
+    "id": "vscode.merge-conflict",
+    "displayName": "Merge Conflict",
+    "name": "merge-conflict"
+  },
+  {
+    "id": "vscode.mermaid-markdown-features",
+    "displayName": "Mermaid Markdown Features",
+    "name": "mermaid-markdown-features"
+  },
+  {
+    "id": "vscode.microsoft-authentication",
+    "displayName": "Microsoft Account",
+    "name": "microsoft-authentication"
+  },
+  {
+    "id": "ms-vscode.js-debug",
+    "displayName": "JavaScript Debugger",
+    "name": "js-debug"
+  },
+  {
+    "id": "ms-vscode.js-debug-companion",
+    "displayName": "JavaScript Debugger Companion Extension",
+    "name": "js-debug-companion"
+  },
+  {
+    "id": "ms-vscode.vscode-js-profile-table",
+    "displayName": "Table Visualizer for JavaScript Profiles",
+    "name": "vscode-js-profile-table"
+  },
+  {
+    "id": "vscode.builtin-notebook-renderers",
+    "displayName": "Builtin Notebook Output Renderers",
+    "name": "builtin-notebook-renderers"
+  },
+  {
+    "id": "vscode.npm",
+    "displayName": "NPM support for VS Code",
+    "name": "npm"
+  },
+  {
+    "id": "vscode.objective-c",
+    "displayName": "Objective-C Language Basics",
+    "name": "objective-c"
+  },
+  {
+    "id": "vscode.perl",
+    "displayName": "Perl Language Basics",
+    "name": "perl"
+  },
+  {
+    "id": "vscode.php",
+    "displayName": "PHP Language Basics",
+    "name": "php"
+  },
+  {
+    "id": "vscode.php-language-features",
+    "displayName": "PHP Language Features",
+    "name": "php-language-features"
+  },
+  {
+    "id": "vscode.powershell",
+    "displayName": "Powershell Language Basics",
+    "name": "powershell"
+  },
+  {
+    "id": "vscode.prompt",
+    "displayName": "Prompt Language Basics",
+    "name": "prompt"
+  },
+  {
+    "id": "vscode.pug",
+    "displayName": "Pug Language Basics",
+    "name": "pug"
+  },
+  {
+    "id": "vscode.python",
+    "displayName": "Python Language Basics",
+    "name": "python"
+  },
+  {
+    "id": "vscode.r",
+    "displayName": "R Language Basics",
+    "name": "r"
+  },
+  {
+    "id": "vscode.razor",
+    "displayName": "Razor Language Basics",
+    "name": "razor"
+  },
+  {
+    "id": "vscode.references-view",
+    "displayName": "Reference Search View",
+    "name": "references-view"
+  },
+  {
+    "id": "vscode.restructuredtext",
+    "displayName": "reStructuredText Language Basics",
+    "name": "restructuredtext"
+  },
+  {
+    "id": "vscode.ruby",
+    "displayName": "Ruby Language Basics",
+    "name": "ruby"
+  },
+  {
+    "id": "vscode.rust",
+    "displayName": "Rust Language Basics",
+    "name": "rust"
+  },
+  {
+    "id": "vscode.scss",
+    "displayName": "SCSS Language Basics",
+    "name": "scss"
+  },
+  {
+    "id": "vscode.search-result",
+    "displayName": "Search Result",
+    "name": "search-result"
+  },
+  {
+    "id": "vscode.shaderlab",
+    "displayName": "Shaderlab Language Basics",
+    "name": "shaderlab"
+  },
+  {
+    "id": "vscode.shellscript",
+    "displayName": "Shell Script Language Basics",
+    "name": "shellscript"
+  },
+  {
+    "id": "vscode.simple-browser",
+    "displayName": "Simple Browser",
+    "name": "simple-browser"
+  },
+  {
+    "id": "vscode.sql",
+    "displayName": "SQL Language Basics",
+    "name": "sql"
+  },
+  {
+    "id": "vscode.swift",
+    "displayName": "Swift Language Basics",
+    "name": "swift"
+  },
+  {
+    "id": "vscode.terminal-suggest",
+    "displayName": "Terminal Suggest for VS Code",
+    "name": "terminal-suggest"
+  },
+  {
+    "id": "vscode.theme-abyss",
+    "displayName": "Abyss Theme",
+    "name": "theme-abyss"
+  },
+  {
+    "id": "vscode.theme-defaults",
+    "displayName": "Default Themes",
+    "name": "theme-defaults"
+  },
+  {
+    "id": "vscode.theme-kimbie-dark",
+    "displayName": "Kimbie Dark Theme",
+    "name": "theme-kimbie-dark"
+  },
+  {
+    "id": "vscode.theme-monokai",
+    "displayName": "Monokai Theme",
+    "name": "theme-monokai"
+  },
+  {
+    "id": "vscode.theme-monokai-dimmed",
+    "displayName": "Monokai Dimmed Theme",
+    "name": "theme-monokai-dimmed"
+  },
+  {
+    "id": "vscode.theme-quietlight",
+    "displayName": "Quiet Light Theme",
+    "name": "theme-quietlight"
+  },
+  {
+    "id": "vscode.theme-red",
+    "displayName": "Red Theme",
+    "name": "theme-red"
+  },
+  {
+    "id": "vscode.vscode-theme-seti",
+    "displayName": "Seti File Icon Theme",
+    "name": "vscode-theme-seti"
+  },
+  {
+    "id": "vscode.theme-solarized-dark",
+    "displayName": "Solarized Dark Theme",
+    "name": "theme-solarized-dark"
+  },
+  {
+    "id": "vscode.theme-solarized-light",
+    "displayName": "Solarized Light Theme",
+    "name": "theme-solarized-light"
+  },
+  {
+    "id": "vscode.theme-tomorrow-night-blue",
+    "displayName": "Tomorrow Night Blue Theme",
+    "name": "theme-tomorrow-night-blue"
+  },
+  {
+    "id": "vscode.tunnel-forwarding",
+    "displayName": "Local Tunnel Port Forwarding",
+    "name": "tunnel-forwarding"
+  },
+  {
+    "id": "vscode.typescript",
+    "displayName": "TypeScript Language Basics",
+    "name": "typescript"
+  },
+  {
+    "id": "vscode.typescript-language-features",
+    "displayName": "JavaScript and TypeScript Language Features",
+    "name": "typescript-language-features"
+  },
+  {
+    "id": "vscode.vb",
+    "displayName": "Visual Basic Language Basics",
+    "name": "vb"
+  },
+  {
+    "id": "vscode.xml",
+    "displayName": "XML Language Basics",
+    "name": "xml"
+  },
+  {
+    "id": "vscode.yaml",
+    "displayName": "YAML Language Basics",
+    "name": "yaml"
+  },
+  {
+    "id": "1YiB.rust-bundle",
+    "displayName": "rust",
+    "name": "rust-bundle"
+  },
+  {
+    "id": "aaravb.chrome-extension-developer-tools",
+    "displayName": "Chrome Extension Developer Tools",
+    "name": "chrome-extension-developer-tools"
+  },
+  {
+    "id": "abdoseadaa.node-js-snippet",
+    "displayName": "Nodejs Snippets",
+    "name": "node-js-snippet"
+  },
+  {
+    "id": "alexisvt.flutter-snippets",
+    "displayName": "Flutter Widget Snippets",
+    "name": "flutter-snippets"
+  },
+  {
+    "id": "Anthropic.claude-code",
+    "displayName": "Claude Code for VS Code",
+    "name": "claude-code"
+  },
+  {
+    "id": "Dart-Code.dart-code",
+    "displayName": "Dart",
+    "name": "dart-code"
+  },
+  {
+    "id": "Dart-Code.flutter",
+    "displayName": "Flutter",
+    "name": "flutter"
+  },
+  {
+    "id": "DivyanshuAgrawal.competitive-programming-helper",
+    "displayName": "Competitive Programming Helper (cph)",
+    "name": "competitive-programming-helper"
+  },
+  {
+    "id": "docker.docker",
+    "displayName": "Docker DX",
+    "name": "docker"
+  },
+  {
+    "id": "dustypomerleau.rust-syntax",
+    "displayName": "Rust Syntax",
+    "name": "rust-syntax"
+  },
+  {
+    "id": "esbenp.prettier-vscode",
+    "displayName": "Prettier - Code formatter",
+    "name": "prettier-vscode"
+  },
+  {
+    "id": "fill-labs.dependi",
+    "displayName": "Dependi",
+    "name": "dependi"
+  },
+  {
+    "id": "formulahendry.code-runner",
+    "displayName": "Code Runner",
+    "name": "code-runner"
+  },
+  {
+    "id": "formulahendry.docker-explorer",
+    "displayName": "Docker Explorer",
+    "name": "docker-explorer"
+  },
+  {
+    "id": "github.vscode-github-actions",
+    "displayName": "GitHub Actions",
+    "name": "vscode-github-actions"
+  },
+  {
+    "id": "golang.go",
+    "displayName": "Go",
+    "name": "go"
+  },
+  {
+    "id": "isudox.vscode-jetbrains-keybindings",
+    "displayName": "JetBrains IDE Keymap",
+    "name": "vscode-jetbrains-keybindings"
+  },
+  {
+    "id": "kcl.kcl-vscode-extension",
+    "displayName": "KCL",
+    "name": "kcl-vscode-extension"
+  },
+  {
+    "id": "ms-azuretools.vscode-containers",
+    "displayName": "Container Tools",
+    "name": "vscode-containers"
+  },
+  {
+    "id": "ms-azuretools.vscode-docker",
+    "displayName": "Docker",
+    "name": "vscode-docker"
+  },
+  {
+    "id": "ms-python.debugpy",
+    "displayName": "Python Debugger",
+    "name": "debugpy"
+  },
+  {
+    "id": "ms-python.python",
+    "displayName": "Python",
+    "name": "python"
+  },
+  {
+    "id": "ms-python.vscode-pylance",
+    "displayName": "Pylance",
+    "name": "vscode-pylance"
+  },
+  {
+    "id": "ms-python.vscode-python-envs",
+    "displayName": "Python Environments",
+    "name": "vscode-python-envs"
+  },
+  {
+    "id": "ms-vscode-remote.remote-containers",
+    "displayName": "Dev Containers",
+    "name": "remote-containers"
+  },
+  {
+    "id": "ms-vscode.cmake-tools",
+    "displayName": "CMake Tools",
+    "name": "cmake-tools"
+  },
+  {
+    "id": "ms-vscode.cpp-devtools",
+    "displayName": "C/C++ DevTools",
+    "name": "cpp-devtools"
+  },
+  {
+    "id": "ms-vscode.cpptools",
+    "displayName": "C/C++",
+    "name": "cpptools"
+  },
+  {
+    "id": "ms-vscode.cpptools-extension-pack",
+    "displayName": "C/C++ Extension Pack",
+    "name": "cpptools-extension-pack"
+  },
+  {
+    "id": "ms-vscode.cpptools-themes",
+    "displayName": "C/C++ Themes",
+    "name": "cpptools-themes"
+  },
+  {
+    "id": "ms-vscode.vscode-typescript-next",
+    "displayName": "JavaScript and TypeScript Nightly",
+    "name": "vscode-typescript-next"
+  },
+  {
+    "id": "Oracle.oracle-java",
+    "displayName": "Java",
+    "name": "oracle-java"
+  },
+  {
+    "id": "redhat.java",
+    "displayName": "Language Support for Java(TM) by Red Hat",
+    "name": "java"
+  },
+  {
+    "id": "rust-lang.rust-analyzer",
+    "displayName": "rust-analyzer",
+    "name": "rust-analyzer"
+  },
+  {
+    "id": "shd101wyy.markdown-preview-enhanced",
+    "displayName": "Markdown Preview Enhanced",
+    "name": "markdown-preview-enhanced"
+  },
+  {
+    "id": "twxs.cmake",
+    "displayName": "CMake",
+    "name": "cmake"
+  },
+  {
+    "id": "vscjava.vscode-gradle",
+    "displayName": "Gradle for Java",
+    "name": "vscode-gradle"
+  },
+  {
+    "id": "vscjava.vscode-java-debug",
+    "displayName": "Debugger for Java",
+    "name": "vscode-java-debug"
+  },
+  {
+    "id": "vscjava.vscode-java-dependency",
+    "displayName": "Project Manager for Java",
+    "name": "vscode-java-dependency"
+  },
+  {
+    "id": "vscjava.vscode-java-pack",
+    "displayName": "Extension Pack for Java",
+    "name": "vscode-java-pack"
+  },
+  {
+    "id": "vscjava.vscode-java-test",
+    "displayName": "Test Runner for Java",
+    "name": "vscode-java-test"
+  },
+  {
+    "id": "vscjava.vscode-maven",
+    "displayName": "Maven for Java",
+    "name": "vscode-maven"
+  },
+  {
+    "id": "vscodevim.vim",
+    "displayName": "Vim",
+    "name": "vim"
+  },
+  {
+    "id": "tokenwall.tokenwall-vscode",
+    "displayName": "TokenWall",
+    "name": "tokenwall-vscode"
+  }
+]
