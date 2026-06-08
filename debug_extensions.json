@@ -650,6 +650,11 @@
     "name": "markdown-preview-enhanced"
   },
   {
+    "id": "tokenwall.tokenwall-vscode",
+    "displayName": "TokenWall",
+    "name": "tokenwall-vscode"
+  },
+  {
     "id": "twxs.cmake",
     "displayName": "CMake",
     "name": "cmake"
@@ -688,10 +693,5 @@
     "id": "vscodevim.vim",
     "displayName": "Vim",
     "name": "vim"
-  },
-  {
-    "id": "tokenwall.tokenwall-vscode",
-    "displayName": "TokenWall",
-    "name": "tokenwall-vscode"
   }
 ]
