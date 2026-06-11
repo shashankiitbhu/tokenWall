@@ -9,4 +9,4 @@ src/**
 tsconfig.json
 vsc-extension-quickstart.md
 icon.svg
-node_modules/@tokenwall/**
+node_modules/**
