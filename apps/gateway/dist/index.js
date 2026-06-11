@@ -16,10 +16,16 @@ const terminal_ui_1 = require("@tokenwall/terminal-ui");
 const eventsource_parser_1 = require("eventsource-parser");
 const websocket_1 = __importDefault(require("@fastify/websocket"));
 const cors_1 = __importDefault(require("@fastify/cors"));
+const static_1 = __importDefault(require("@fastify/static"));
+const path_1 = __importDefault(require("path"));
 const control_plane_js_1 = require("./control-plane.js");
 const server = (0, fastify_1.default)({ logger: false });
 server.register(cors_1.default, { origin: '*' });
 server.register(websocket_1.default);
+server.register(static_1.default, {
+    root: path_1.default.join(__dirname, '../../dashboard/dist'),
+    prefix: '/dashboard/',
+});
 server.register(async function (f) {
     control_plane_js_1.controlPlane.registerWebsocket(f);
 });

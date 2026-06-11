@@ -167,6 +167,18 @@ function launchDaemon(context: vscode.ExtensionContext) {
     const nodeModulesPath = path.resolve(context.extensionPath, 'node_modules/@tokenwall/gateway/dist/index.js');
     if (fs.existsSync(nodeModulesPath)) {
       gatewayPath = nodeModulesPath;
+    } else {
+      // Dev environment fallback
+      const folders = vscode.workspace.workspaceFolders;
+      if (folders) {
+        for (const f of folders) {
+          const devPath = path.resolve(f.uri.fsPath, 'apps/gateway/dist/index.js');
+          if (fs.existsSync(devPath)) {
+            gatewayPath = devPath;
+            break;
+          }
+        }
+      }
     }
   }
 
@@ -456,7 +468,25 @@ async function showStatusSummary() {
 
     const totalSaved = summary.preventedSpend + summary.optimizedSavings;
 
+    const actionItems = [
+      {
+        label: `$(graph) Open Observability Dashboard`,
+        detail: 'View detailed analytics and forensic logs',
+        action: 'open_dashboard'
+      },
+      {
+        label: `$(settings-gear) Configure TokenWall Limits`,
+        detail: 'Set daily/monthly budgets and optimization preferences',
+        action: 'configure_limits'
+      },
+      {
+        label: '--- Spend Summary ---',
+        kind: vscode.QuickPickItemKind.Separator
+      }
+    ];
+
     const quickPickItems = [
+      ...actionItems,
       {
         label: `Today's Spend: $${summary.dailySpend.toFixed(4)} / $${summary.dailyLimit.toFixed(2)}`,
         detail: `Daily budget consumption: ${Math.round((summary.dailySpend / (summary.dailyLimit || 10.0)) * 100)}%`
@@ -495,10 +525,18 @@ async function showStatusSummary() {
       }))
     ];
 
-    vscode.window.showQuickPick(quickPickItems as any, {
+    const picked = await vscode.window.showQuickPick(quickPickItems as any, {
       title: `TokenWall Summary • Total Savings: $${totalSaved.toFixed(2)}`,
-      placeHolder: 'Select any item to close status'
+      placeHolder: 'Select an action or view summary'
     });
+
+    if (picked && (picked as any).action) {
+      if ((picked as any).action === 'open_dashboard') {
+        vscode.env.openExternal(vscode.Uri.parse('http://localhost:1984/dashboard/'));
+      } else if ((picked as any).action === 'configure_limits') {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'tokenwall');
+      }
+    }
   } catch (err: any) {
     vscode.window.showErrorMessage(`Failed to fetch stats: ${err.message}`);
   }

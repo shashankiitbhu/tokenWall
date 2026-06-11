@@ -11,11 +11,17 @@ import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
 import fastifyWebsocket from '@fastify/websocket';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
 import { controlPlane } from './control-plane.js';
 
 const server = fastify({ logger: false });
 server.register(cors as any, { origin: '*' });
 server.register(fastifyWebsocket as any);
+server.register(fastifyStatic as any, {
+  root: path.join(__dirname, '../../dashboard/dist'),
+  prefix: '/dashboard/',
+});
 server.register(async function (f) {
   controlPlane.registerWebsocket(f);
 });
