@@ -622,7 +622,7 @@ async function autoConfigureAIExtensions() {
   // 3. Check for Claude Code extension
   const claudeCodeExt = extensions.find(e => e.id.toLowerCase() === 'anthropic.claude-code' || e.id.toLowerCase().includes('claude-code'));
   if (claudeCodeExt) {
-    const config = vscode.workspace.getConfiguration('claudeCode');
+    const config = vscode.workspace.getConfiguration('claude-code');
     let envVars = config.get<Array<{ name: string; value: string }>>('environmentVariables') || [];
     const hasBaseUrl = envVars.some(v => v.name === 'ANTHROPIC_BASE_URL');
     
