@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, exec, ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 
 let daemonProcess: ChildProcess | null = null;
@@ -13,6 +13,7 @@ let pollTimer: NodeJS.Timeout | null = null;
 let isConnected = false;
 const activeQuickPicks = new Map<string, any>();
 let daemonOutputChannel: vscode.OutputChannel | null = null;
+let isDownloadingDaemon = false;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
@@ -34,6 +35,14 @@ export function activate(context: vscode.ExtensionContext) {
   daemonOutputChannel = vscode.window.createOutputChannel('TokenWall Daemon');
   context.subscriptions.push(daemonOutputChannel);
   daemonOutputChannel.appendLine('TokenWall companion extension activated.');
+
+  // Check Node availability
+  exec('node --version', (err) => {
+    if (err) {
+      daemonOutputChannel?.appendLine('Warning: Node.js was not detected in the environment path.');
+      vscode.window.showWarningMessage('TokenWall requires Node.js to run the spend protection daemon. Please ensure Node.js is installed on your system.');
+    }
+  });
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'tokenwall.showStatus';
@@ -187,9 +196,19 @@ function launchDaemon(context: vscode.ExtensionContext) {
     }
   }
 
+  const config = vscode.workspace.getConfiguration('tokenwall');
+  const customCommand = config.get<string>('customDaemonCommand');
+
   daemonOutputChannel?.appendLine(`Starting TokenWall gateway daemon... Resolved path: ${gatewayPath}`);
   
-  if (gatewayPath) {
+  if (customCommand) {
+    daemonOutputChannel?.appendLine(`Spawning custom daemon command: "${customCommand}"`);
+    daemonProcess = spawn(customCommand, [], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
+    });
+  } else if (gatewayPath) {
     daemonOutputChannel?.appendLine(`Spawning local daemon via node: "${gatewayPath}"`);
     daemonProcess = spawn('node', [gatewayPath], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -197,6 +216,8 @@ function launchDaemon(context: vscode.ExtensionContext) {
     });
   } else {
     daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx: "npx --yes tokenwall start"');
+    isDownloadingDaemon = true;
+    updateStatusBarText('Downloading Daemon...', 'yellow');
     daemonProcess = spawn('npx --yes tokenwall start', [], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
@@ -220,6 +241,7 @@ function launchDaemon(context: vscode.ExtensionContext) {
   daemonProcess.on('exit', (code) => {
     daemonOutputChannel?.appendLine(`[Daemon EXIT] Daemon exited with code ${code}`);
     daemonProcess = null;
+    isDownloadingDaemon = false;
     updateStatusBarText('Offline', 'red');
     
     // Auto-recovery
@@ -258,6 +280,7 @@ function connectControlPlane(context: vscode.ExtensionContext) {
 
   wsClient.on('open', () => {
     isConnected = true;
+    isDownloadingDaemon = false;
     console.log('WS Connection to TokenWall Control Plane established.');
     fetchStatsAndUpdateUI();
   });
@@ -455,6 +478,13 @@ async function fetchStatsAndUpdateUI() {
 
 function updateStatusBarText(text: string, color: 'green' | 'yellow' | 'red') {
   if (!statusBarItem) return;
+  
+  if (isDownloadingDaemon && (text === 'Reconnecting...' || text === 'Offline')) {
+    statusBarItem.text = `$(cloud-download) Downloading Daemon...`;
+    statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+    return;
+  }
+
   statusBarItem.text = `$(shield) ${text}`;
   
   if (color === 'red') {

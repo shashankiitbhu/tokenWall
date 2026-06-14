@@ -2,7 +2,7 @@
   "name": "tokenwall-vscode",
   "displayName": "TokenWall",
   "description": "Seamless editor-native AI spend prevention and budget governance for coding agents",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "publisher": "tokenwall",
   "icon": "icon.png",
   "license": "MIT",
@@ -68,6 +68,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically apply prompt optimization to reduce token bloat."
+        },
+        "tokenwall.customDaemonCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Custom shell command to launch the TokenWall daemon (e.g. 'tokenwall start' or absolute path to tokenwall command)."
         }
       }
     },
