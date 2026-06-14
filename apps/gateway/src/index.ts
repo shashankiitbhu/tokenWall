@@ -26,14 +26,18 @@ server.register(async function (f) {
   controlPlane.registerWebsocket(f);
 });
 
+console.log("[TokenWall Gateway] Initializing components...");
 const db = new DBManager();
+console.log("[TokenWall Gateway] DBManager initialized.");
 const configManager = new ConfigManager();
+console.log("[TokenWall Gateway] ConfigManager initialized.");
 const budgetEvaluator = new BudgetEvaluator(db, configManager);
 const loopDetector = new RunawayLoopDetector(db);
 const contextAnalyzer = new ContextAnalyzer();
 const modelRouter = new ModelRouter();
 const promptOptimizer = new PromptOptimizer();
 const telemetryLogger = new TelemetryLogger(db);
+console.log("[TokenWall Gateway] All engines ready. Starting server listen...");
 
 // Admin API
 server.get('/api/admin/sessions', async (request, reply) => {

@@ -11,13 +11,19 @@ const os_1 = __importDefault(require("os"));
 class DBManager {
     db;
     constructor(dbPath) {
+        console.log("[TokenWall DB] Resolving database path...");
         const finalPath = dbPath || this.getDefaultDBPath();
+        console.log(`[TokenWall DB] Path: ${finalPath}`);
         const dir = path_1.default.dirname(finalPath);
         if (!fs_1.default.existsSync(dir)) {
+            console.log(`[TokenWall DB] Creating directory: ${dir}`);
             fs_1.default.mkdirSync(dir, { recursive: true });
         }
+        console.log("[TokenWall DB] Connecting to SQLite...");
         this.db = new better_sqlite3_1.default(finalPath);
+        console.log("[TokenWall DB] SQLite connected. Initializing schema...");
         this.initSchema();
+        console.log("[TokenWall DB] Schema initialized successfully.");
     }
     getSessionSummary(sessionId) {
         const res = this.db.prepare(`

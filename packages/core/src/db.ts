@@ -57,13 +57,19 @@ export class DBManager {
   public db: Database.Database;
 
   constructor(dbPath?: string) {
+    console.log("[TokenWall DB] Resolving database path...");
     const finalPath = dbPath || this.getDefaultDBPath();
+    console.log(`[TokenWall DB] Path: ${finalPath}`);
     const dir = path.dirname(finalPath);
     if (!fs.existsSync(dir)) {
+      console.log(`[TokenWall DB] Creating directory: ${dir}`);
       fs.mkdirSync(dir, { recursive: true });
     }
+    console.log("[TokenWall DB] Connecting to SQLite...");
     this.db = new Database(finalPath);
+    console.log("[TokenWall DB] SQLite connected. Initializing schema...");
     this.initSchema();
+    console.log("[TokenWall DB] Schema initialized successfully.");
   }
 
   getSessionSummary(sessionId: string): { totalInput: number; totalOutput: number; totalCost: number; count: number; blocked: number; saved: number } {
