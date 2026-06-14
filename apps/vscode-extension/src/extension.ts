@@ -197,7 +197,7 @@ function launchDaemon(context: vscode.ExtensionContext) {
     });
   } else {
     daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx: "npx --yes tokenwall start"');
-    daemonProcess = spawn('npx', ['--yes', 'tokenwall', 'start'], {
+    daemonProcess = spawn('npx --yes tokenwall start', [], {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
