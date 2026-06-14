@@ -215,12 +215,12 @@ function launchDaemon(context: vscode.ExtensionContext) {
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
     });
   } else {
-    daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx: "npx --yes tokenwall start"');
+    daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx...');
     isDownloadingDaemon = true;
     updateStatusBarText('Downloading Daemon...', 'yellow');
-    daemonProcess = spawn('npx --yes tokenwall start', [], {
+    const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    daemonProcess = spawn(cmd, ['--yes', 'tokenwall', 'start'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
     });
   }
