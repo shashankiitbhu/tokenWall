@@ -14,6 +14,9 @@ let isConnected = false;
 const activeQuickPicks = new Map<string, any>();
 let daemonOutputChannel: vscode.OutputChannel | null = null;
 let isDownloadingDaemon = false;
+let daemonCrashCount = 0;
+let isSpawning = false;
+let intentionalStop = false;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
@@ -169,7 +172,9 @@ async function checkDaemonHealth(): Promise<boolean> {
 }
 
 function launchDaemon(context: vscode.ExtensionContext) {
-  if (daemonProcess) return;
+  if (daemonProcess || isSpawning) return;
+  isSpawning = true;
+  intentionalStop = false;
 
   const localGateway = path.resolve(context.extensionPath, '../gateway/dist/index.js');
   
@@ -199,68 +204,152 @@ function launchDaemon(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration('tokenwall');
   const customCommand = config.get<string>('customDaemonCommand');
 
-  daemonOutputChannel?.appendLine(`Starting TokenWall gateway daemon... Resolved path: ${gatewayPath}`);
-  
+  daemonOutputChannel?.appendLine(`[Daemon Manager] Preparing to start background daemon...`);
+
+  // Build the list of strategies to try in order
+  const strategies: { name: string; cmd: string; args: string[]; useShell?: boolean }[] = [];
+
   if (customCommand) {
-    daemonOutputChannel?.appendLine(`Spawning custom daemon command: "${customCommand}"`);
-    daemonProcess = spawn(customCommand, [], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
-    });
-  } else if (gatewayPath) {
-    daemonOutputChannel?.appendLine(`Spawning local daemon via node: "${gatewayPath}"`);
-    daemonProcess = spawn('node', [gatewayPath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
-    });
+    strategies.push({ name: 'customCommand', cmd: customCommand, args: [], useShell: true });
+  }
+
+  if (gatewayPath) {
+    strategies.push({ name: 'localGateway', cmd: 'node', args: [gatewayPath] });
   } else {
-    daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx...');
-    isDownloadingDaemon = true;
-    updateStatusBarText('Downloading Daemon...', 'yellow');
-    const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    daemonProcess = spawn(cmd, ['--yes', 'tokenwall', 'start'], {
+    // Try global tokenwall command
+    const globalCmd = process.platform === 'win32' ? 'tokenwall.cmd' : 'tokenwall';
+    strategies.push({ name: 'globalTokenWall', cmd: globalCmd, args: ['start'] });
+
+    // Fall back to npx
+    const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    strategies.push({ name: 'npxFallback', cmd: npxCmd, args: ['--yes', 'tokenwall', 'start'] });
+  }
+
+  function attemptSpawn(index: number) {
+    if (index >= strategies.length) {
+      daemonOutputChannel?.appendLine('[Daemon Manager] All spawn strategies failed.');
+      isSpawning = false;
+      isDownloadingDaemon = false;
+      updateStatusBarText('Offline', 'red');
+      
+      daemonCrashCount++;
+      handleCrash();
+      return;
+    }
+
+    const strategy = strategies[index];
+    daemonOutputChannel?.appendLine(`[Daemon Manager] Attempting strategy "${strategy.name}": ${strategy.cmd} ${strategy.args.join(' ')}`);
+
+    if (strategy.name === 'npxFallback') {
+      isDownloadingDaemon = true;
+      updateStatusBarText('Downloading Daemon...', 'yellow');
+    }
+
+    let hasFailed = false;
+    const startTime = Date.now();
+
+    const child = spawn(strategy.cmd, strategy.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: strategy.useShell || false,
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
+    });
+
+    daemonProcess = child;
+
+    child.stdout?.on('data', (data) => {
+      daemonOutputChannel?.appendLine(`[Daemon STDOUT] ${data.toString().trim()}`);
+    });
+
+    child.stderr?.on('data', (data) => {
+      daemonOutputChannel?.appendLine(`[Daemon STDERR] ${data.toString().trim()}`);
+    });
+
+    child.on('error', (err: any) => {
+      daemonOutputChannel?.appendLine(`[Daemon ERROR] Strategy "${strategy.name}" failed: ${err.message}`);
+      if (hasFailed) return;
+      hasFailed = true;
+      daemonProcess = null;
+      // Immediately try next strategy
+      attemptSpawn(index + 1);
+    });
+
+    child.on('exit', (code) => {
+      daemonOutputChannel?.appendLine(`[Daemon EXIT] Strategy "${strategy.name}" exited with code ${code}`);
+      if (hasFailed) return;
+      hasFailed = true;
+      daemonProcess = null;
+      isDownloadingDaemon = false;
+      updateStatusBarText('Offline', 'red');
+
+      if (intentionalStop) {
+        daemonOutputChannel?.appendLine('[Daemon Manager] Daemon was stopped intentionally. Auto-recovery skipped.');
+        intentionalStop = false;
+        isSpawning = false;
+        return;
+      }
+
+      const duration = Date.now() - startTime;
+      if (code !== 0 && duration < 3000) {
+        daemonOutputChannel?.appendLine(`[Daemon Manager] Strategy "${strategy.name}" failed quickly. Trying next strategy...`);
+        attemptSpawn(index + 1);
+      } else {
+        if (duration < 5000) {
+          daemonCrashCount++;
+        } else {
+          daemonCrashCount = 0; // Reset on clean run
+        }
+        handleCrash();
+      }
     });
   }
 
-  daemonProcess.stdout?.on('data', (data) => {
-    daemonOutputChannel?.appendLine(`[Daemon STDOUT] ${data.toString().trim()}`);
-  });
+  function handleCrash() {
+    isSpawning = false;
 
-  daemonProcess.stderr?.on('data', (data) => {
-    daemonOutputChannel?.appendLine(`[Daemon STDERR] ${data.toString().trim()}`);
-  });
+    if (daemonCrashCount >= 3) {
+      daemonOutputChannel?.appendLine(`[Daemon Manager] Daemon crashed ${daemonCrashCount} times consecutively. Disabling auto-recovery.`);
+      vscode.window.showErrorMessage(
+        'TokenWall spend protection daemon failed to start. Please verify your Node/npm environment. You can try installing the package globally, or checking the logs.',
+        'Retry', 'Show Logs', 'Copy Install Command'
+      ).then((selection) => {
+        if (selection === 'Retry') {
+          daemonCrashCount = 0;
+          launchDaemon(context);
+        } else if (selection === 'Show Logs') {
+          daemonOutputChannel?.show();
+        } else if (selection === 'Copy Install Command') {
+          vscode.env.clipboard.writeText('npm install -g tokenwall');
+          vscode.window.showInformationMessage('Copied "npm install -g tokenwall" to clipboard.');
+        }
+      });
+      return;
+    }
 
-  daemonProcess.on('error', (err) => {
-    daemonOutputChannel?.appendLine(`[Daemon ERROR] Spawn/run error: ${err.message}`);
-    vscode.window.showErrorMessage(`TokenWall companion extension failed to start background daemon: ${err.message}`);
-  });
+    const delays = [5000, 15000, 30000];
+    const delay = delays[Math.min(daemonCrashCount, delays.length - 1)];
+    daemonOutputChannel?.appendLine(`[Daemon Manager] Auto-recovery: waiting ${delay / 1000}s before checking/relaunching...`);
 
-  daemonProcess.on('exit', (code) => {
-    daemonOutputChannel?.appendLine(`[Daemon EXIT] Daemon exited with code ${code}`);
-    daemonProcess = null;
-    isDownloadingDaemon = false;
-    updateStatusBarText('Offline', 'red');
-    
-    // Auto-recovery
     setTimeout(() => {
       checkDaemonHealth().then((alive) => {
         if (!alive) launchDaemon(context);
       });
-    }, 5000);
-  });
+    }, delay);
+  }
+
+  attemptSpawn(0);
 }
 
 function restartDaemon(context: vscode.ExtensionContext) {
   stopDaemon();
   vscode.window.showInformationMessage('Restarting TokenWall gateway daemon...');
+  daemonCrashCount = 0;
+  isSpawning = false;
   setTimeout(() => launchDaemon(context), 1500);
 }
 
 function stopDaemon() {
   if (daemonProcess) {
+    intentionalStop = true;
     daemonProcess.kill();
     daemonProcess = null;
   }
@@ -281,6 +370,8 @@ function connectControlPlane(context: vscode.ExtensionContext) {
   wsClient.on('open', () => {
     isConnected = true;
     isDownloadingDaemon = false;
+    daemonCrashCount = 0;
+    isSpawning = false;
     console.log('WS Connection to TokenWall Control Plane established.');
     fetchStatsAndUpdateUI();
   });
