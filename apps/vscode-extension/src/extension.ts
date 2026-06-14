@@ -12,6 +12,7 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
 let isConnected = false;
 const activeQuickPicks = new Map<string, any>();
+let daemonOutputChannel: vscode.OutputChannel | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
@@ -30,6 +31,10 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // 1. Initialize Status Bar
+  daemonOutputChannel = vscode.window.createOutputChannel('TokenWall Daemon');
+  context.subscriptions.push(daemonOutputChannel);
+  daemonOutputChannel.appendLine('TokenWall companion extension activated.');
+
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBarItem.command = 'tokenwall.showStatus';
   context.subscriptions.push(statusBarItem);
@@ -89,7 +94,7 @@ async function getOrCreateWorkspaceProject(): Promise<string | null> {
   const name = folder.name;
   const dirPath = folder.uri.fsPath;
   try {
-    const res = await fetch('http://localhost:1984/api/admin/project/get-or-create', {
+    const res = await fetch('http://127.0.0.1:1984/api/admin/project/get-or-create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, path: dirPath })
@@ -110,9 +115,9 @@ async function updateTerminalEnvironment(context: vscode.ExtensionContext) {
   const enableInterception = config.get<boolean>('enableAutoInterception', true);
 
   if (enableInterception) {
-    env.replace('ANTHROPIC_BASE_URL', 'http://localhost:1984');
-    env.replace('OPENAI_BASE_URL', 'http://localhost:1984/v1');
-    env.replace('GEMINI_BASE_URL', 'http://localhost:1984');
+    env.replace('ANTHROPIC_BASE_URL', 'http://127.0.0.1:1984');
+    env.replace('OPENAI_BASE_URL', 'http://127.0.0.1:1984/v1');
+    env.replace('GEMINI_BASE_URL', 'http://127.0.0.1:1984');
     
     // Auto-detect project id from active workspace folder
     try {
@@ -146,7 +151,7 @@ async function checkDaemonHealth(): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1000);
-    const res = await fetch('http://localhost:1984/api/admin/budgets', { signal: controller.signal });
+    const res = await fetch('http://127.0.0.1:1984/api/admin/budgets', { signal: controller.signal });
     clearTimeout(timeoutId);
     return res.ok;
   } catch {
@@ -182,24 +187,38 @@ function launchDaemon(context: vscode.ExtensionContext) {
     }
   }
 
-  console.log(`Starting TokenWall gateway daemon... Resolved path: ${gatewayPath}`);
+  daemonOutputChannel?.appendLine(`Starting TokenWall gateway daemon... Resolved path: ${gatewayPath}`);
   
   if (gatewayPath) {
+    daemonOutputChannel?.appendLine(`Spawning local daemon via node: "${gatewayPath}"`);
     daemonProcess = spawn('node', [gatewayPath], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
     });
   } else {
-    // Fallback: spawn npx global launch
+    daemonOutputChannel?.appendLine('Spawning local daemon fallback via npx: "npx --yes tokenwall start"');
     daemonProcess = spawn('npx', ['--yes', 'tokenwall', 'start'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       shell: true,
       env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
     });
   }
 
+  daemonProcess.stdout?.on('data', (data) => {
+    daemonOutputChannel?.appendLine(`[Daemon STDOUT] ${data.toString().trim()}`);
+  });
+
+  daemonProcess.stderr?.on('data', (data) => {
+    daemonOutputChannel?.appendLine(`[Daemon STDERR] ${data.toString().trim()}`);
+  });
+
+  daemonProcess.on('error', (err) => {
+    daemonOutputChannel?.appendLine(`[Daemon ERROR] Spawn/run error: ${err.message}`);
+    vscode.window.showErrorMessage(`TokenWall companion extension failed to start background daemon: ${err.message}`);
+  });
+
   daemonProcess.on('exit', (code) => {
-    console.log(`TokenWall gateway daemon exited with code ${code}`);
+    daemonOutputChannel?.appendLine(`[Daemon EXIT] Daemon exited with code ${code}`);
     daemonProcess = null;
     updateStatusBarText('Offline', 'red');
     
@@ -235,7 +254,7 @@ function connectControlPlane(context: vscode.ExtensionContext) {
     } catch {}
   }
 
-  wsClient = new WebSocket('ws://localhost:1984/ws/control');
+  wsClient = new WebSocket('ws://127.0.0.1:1984/ws/control');
 
   wsClient.on('open', () => {
     isConnected = true;
@@ -408,7 +427,7 @@ async function fetchStatsAndUpdateUI() {
   if (!isConnected) return;
 
   try {
-    const res = await fetch('http://localhost:1984/api/admin/summary');
+    const res = await fetch('http://127.0.0.1:1984/api/admin/summary');
     if (res.ok) {
       const summary = await res.json() as {
         dailySpend: number;
@@ -449,7 +468,7 @@ function updateStatusBarText(text: string, color: 'green' | 'yellow' | 'red') {
 
 async function showStatusSummary() {
   try {
-    const res = await fetch('http://localhost:1984/api/admin/summary');
+    const res = await fetch('http://127.0.0.1:1984/api/admin/summary');
     if (!res.ok) {
       vscode.window.showErrorMessage('TokenWall Gateway daemon API is unreachable.');
       return;
@@ -532,7 +551,7 @@ async function showStatusSummary() {
 
     if (picked && (picked as any).action) {
       if ((picked as any).action === 'open_dashboard') {
-        vscode.env.openExternal(vscode.Uri.parse('http://localhost:1984/dashboard/'));
+        vscode.env.openExternal(vscode.Uri.parse('http://127.0.0.1:1984/dashboard/'));
       } else if ((picked as any).action === 'configure_limits') {
         vscode.commands.executeCommand('workbench.action.openSettings', 'tokenwall');
       }
@@ -594,7 +613,7 @@ async function autoConfigureAIExtensions() {
       );
       if (opt === 'Enable Protection') {
         await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
-        await config.update('apiEndpoint', 'http://localhost:1984/v1', vscode.ConfigurationTarget.Global);
+        await config.update('apiEndpoint', 'http://127.0.0.1:1984/v1', vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage('TokenWall spend protection enabled for Cline!');
       }
     }
@@ -613,7 +632,7 @@ async function autoConfigureAIExtensions() {
       );
       if (opt === 'Enable Protection') {
         await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
-        await config.update('apiEndpoint', 'http://localhost:1984/v1', vscode.ConfigurationTarget.Global);
+        await config.update('apiEndpoint', 'http://127.0.0.1:1984/v1', vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage('TokenWall spend protection enabled for Roo Cline!');
       }
     }
@@ -634,7 +653,7 @@ async function autoConfigureAIExtensions() {
       );
       if (opt === 'Enable Protection') {
         const updatedEnvVars = [...envVars];
-        updatedEnvVars.push({ name: 'ANTHROPIC_BASE_URL', value: 'http://localhost:1984' });
+        updatedEnvVars.push({ name: 'ANTHROPIC_BASE_URL', value: 'http://127.0.0.1:1984' });
         await config.update('environmentVariables', updatedEnvVars, vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage('TokenWall spend protection enabled for Claude Code!');
       }

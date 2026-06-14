@@ -61,7 +61,7 @@ interface Budget {
   hard_limit: number;
 }
 
-const API_BASE = 'http://localhost:1984/api/admin';
+const API_BASE = 'http://127.0.0.1:1984/api/admin';
 
 function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);

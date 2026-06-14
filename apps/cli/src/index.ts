@@ -170,9 +170,9 @@ async function main() {
 
     const env = {
       ...process.env,
-      OPENAI_BASE_URL: 'http://localhost:1984/v1',
-      ANTHROPIC_BASE_URL: 'http://localhost:1984',
-      GEMINI_BASE_URL: 'http://localhost:1984',
+      OPENAI_BASE_URL: 'http://127.0.0.1:1984/v1',
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:1984',
+      GEMINI_BASE_URL: 'http://127.0.0.1:1984',
       TOKENWALL_SESSION_ID: sessionUuid,
       TOKENWALL_PROJECT_ID: project.id
     };
