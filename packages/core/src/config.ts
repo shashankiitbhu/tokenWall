@@ -18,6 +18,11 @@ export interface TokenWallConfig {
     neverDowngradeReasoning?: boolean;
     budgetAwareRouting?: boolean;
   };
+  reversibleCompression?: boolean;
+  verbositySteering?: boolean;
+  jsonCrushing?: boolean;
+  codeCompression?: boolean;
+  cacheAlignment?: boolean;
 }
 
 const DEFAULT_CONFIG: TokenWallConfig = {
@@ -46,7 +51,12 @@ const DEFAULT_CONFIG: TokenWallConfig = {
     autoSwitchBelowThreshold: 0.10,
     neverDowngradeReasoning: true,
     budgetAwareRouting: false
-  }
+  },
+  reversibleCompression: true,
+  verbositySteering: true,
+  jsonCrushing: true,
+  codeCompression: true,
+  cacheAlignment: true
 };
 
 export class ConfigManager {

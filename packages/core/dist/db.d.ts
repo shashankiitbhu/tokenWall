@@ -96,5 +96,7 @@ export declare class DBManager {
         optimizedSavings: number;
         savedTokens: number;
     };
+    saveCachedContent(id: string, requestId: string, content: string): void;
+    getCachedContent(id: string): string | undefined;
     close(): void;
 }

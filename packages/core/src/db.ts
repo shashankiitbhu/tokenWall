@@ -177,6 +177,14 @@ export class DBManager {
         FOREIGN KEY(request_id) REFERENCES requests(id)
       );
 
+      CREATE TABLE IF NOT EXISTS cached_contents (
+        id TEXT PRIMARY KEY,
+        request_id TEXT NOT NULL,
+        original_content TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(request_id) REFERENCES requests(id)
+      );
+
       CREATE VIEW IF NOT EXISTS workspace_usage AS
       SELECT 
         p.id as project_id, 
@@ -450,6 +458,18 @@ export class DBManager {
       optimizedSavings: optimizedStmt?.amt || 0,
       savedTokens: optimizedStmt?.tokens || 0
     };
+  }
+
+  saveCachedContent(id: string, requestId: string, content: string) {
+    this.db.prepare(`
+      INSERT INTO cached_contents (id, request_id, original_content)
+      VALUES (?, ?, ?)
+    `).run(id, requestId, content);
+  }
+
+  getCachedContent(id: string): string | undefined {
+    const res = this.db.prepare('SELECT original_content FROM cached_contents WHERE id = ?').get(id) as { original_content: string } | undefined;
+    return res?.original_content;
   }
 
   close() {

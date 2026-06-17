@@ -33,7 +33,12 @@ const DEFAULT_CONFIG = {
         autoSwitchBelowThreshold: 0.10,
         neverDowngradeReasoning: true,
         budgetAwareRouting: false
-    }
+    },
+    reversibleCompression: true,
+    verbositySteering: true,
+    jsonCrushing: true,
+    codeCompression: true,
+    cacheAlignment: true
 };
 class ConfigManager {
     configPath;

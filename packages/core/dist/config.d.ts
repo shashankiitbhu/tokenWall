@@ -17,6 +17,11 @@ export interface TokenWallConfig {
         neverDowngradeReasoning?: boolean;
         budgetAwareRouting?: boolean;
     };
+    reversibleCompression?: boolean;
+    verbositySteering?: boolean;
+    jsonCrushing?: boolean;
+    codeCompression?: boolean;
+    cacheAlignment?: boolean;
 }
 export declare class ConfigManager {
     private configPath;

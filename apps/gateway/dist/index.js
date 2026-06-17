@@ -154,6 +154,508 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, lastUserIdx
     }
     return newContents;
 }
+function injectCCRTool(provider, body) {
+    if (provider === 'openai') {
+        if (!body.tools)
+            body.tools = [];
+        body.tools.push({
+            type: 'function',
+            function: {
+                name: 'tokenwall_retrieve_content',
+                description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        content_id: {
+                            type: 'string',
+                            description: 'The unique ID of the cached content block (e.g., ccr_lk_xxxx).'
+                        }
+                    },
+                    required: ['content_id']
+                }
+            }
+        });
+    }
+    else if (provider === 'anthropic') {
+        if (!body.tools)
+            body.tools = [];
+        body.tools.push({
+            name: 'tokenwall_retrieve_content',
+            description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+            input_schema: {
+                type: 'object',
+                properties: {
+                    content_id: {
+                        type: 'string',
+                        description: 'The unique ID of the cached content block (e.g., ccr_lk_xxxx).'
+                    }
+                },
+                required: ['content_id']
+            }
+        });
+    }
+    else if (provider === 'gemini') {
+        if (!body.tools)
+            body.tools = [];
+        let toolObj = body.tools.find((t) => t.functionDeclarations);
+        if (!toolObj) {
+            toolObj = { functionDeclarations: [] };
+            body.tools.push(toolObj);
+        }
+        toolObj.functionDeclarations.push({
+            name: 'tokenwall_retrieve_content',
+            description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+            parameters: {
+                type: 'OBJECT',
+                properties: {
+                    content_id: {
+                        type: 'STRING',
+                        description: 'The unique ID of the cached content block (e.g., ccr_lk_xxxx).'
+                    }
+                },
+                required: ['content_id']
+            }
+        });
+    }
+}
+function injectVerbositySteering(provider, body) {
+    const steeringMsg = "Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.";
+    if (provider === 'openai') {
+        if (!body.messages)
+            body.messages = [];
+        const systemMsg = body.messages.find((m) => m.role === 'system');
+        if (systemMsg) {
+            systemMsg.content += `\n${steeringMsg}`;
+        }
+        else {
+            body.messages.unshift({ role: 'system', content: steeringMsg });
+        }
+    }
+    else if (provider === 'anthropic') {
+        if (body.system) {
+            if (typeof body.system === 'string') {
+                body.system += `\n${steeringMsg}`;
+            }
+            else if (Array.isArray(body.system)) {
+                body.system.push({ type: 'text', text: steeringMsg });
+            }
+        }
+        else {
+            body.system = steeringMsg;
+        }
+    }
+    else if (provider === 'gemini') {
+        if (body.systemInstruction) {
+            if (!body.systemInstruction.parts)
+                body.systemInstruction.parts = [];
+            const textPart = body.systemInstruction.parts.find((p) => typeof p.text === 'string');
+            if (textPart) {
+                textPart.text += `\n${steeringMsg}`;
+            }
+            else {
+                body.systemInstruction.parts.push({ text: steeringMsg });
+            }
+        }
+        else {
+            body.systemInstruction = { parts: [{ text: steeringMsg }] };
+        }
+    }
+}
+function injectAnthropicCacheControl(body) {
+    if (body.system) {
+        if (typeof body.system === 'string') {
+            body.system = [
+                { type: 'text', text: body.system, cache_control: { type: 'ephemeral' } }
+            ];
+        }
+        else if (Array.isArray(body.system) && body.system.length > 0) {
+            const lastBlock = body.system[body.system.length - 1];
+            if (typeof lastBlock === 'object') {
+                lastBlock.cache_control = { type: 'ephemeral' };
+            }
+        }
+    }
+    if (body.tools && Array.isArray(body.tools) && body.tools.length > 0) {
+        const lastTool = body.tools[body.tools.length - 1];
+        if (typeof lastTool === 'object') {
+            lastTool.cache_control = { type: 'ephemeral' };
+        }
+    }
+    if (body.messages && Array.isArray(body.messages) && body.messages.length > 3) {
+        const userMessages = body.messages.filter((m) => m.role === 'user');
+        if (userMessages.length > 0) {
+            const lastUserMsg = userMessages[userMessages.length - 1];
+            if (lastUserMsg && lastUserMsg.content) {
+                if (typeof lastUserMsg.content === 'string') {
+                    lastUserMsg.content = [
+                        { type: 'text', text: lastUserMsg.content, cache_control: { type: 'ephemeral' } }
+                    ];
+                }
+                else if (Array.isArray(lastUserMsg.content) && lastUserMsg.content.length > 0) {
+                    const lastBlock = lastUserMsg.content[lastUserMsg.content.length - 1];
+                    if (typeof lastBlock === 'object') {
+                        lastBlock.cache_control = { type: 'ephemeral' };
+                    }
+                }
+            }
+        }
+    }
+}
+async function executeUpstreamRequest(provider, targetUrl, headers, requestBody) {
+    const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+    });
+    if (!response.ok) {
+        return { response, resBody: null };
+    }
+    const resBody = await response.json();
+    let hasCCRToolCall = false;
+    let contentId = '';
+    let toolCallId = '';
+    if (provider === 'openai') {
+        const toolCall = resBody.choices?.[0]?.message?.tool_calls?.find((tc) => tc.function?.name === 'tokenwall_retrieve_content');
+        if (toolCall) {
+            hasCCRToolCall = true;
+            toolCallId = toolCall.id;
+            try {
+                contentId = JSON.parse(toolCall.function.arguments).content_id;
+            }
+            catch {
+                contentId = toolCall.function.arguments;
+            }
+        }
+    }
+    else if (provider === 'anthropic') {
+        const toolUseBlock = resBody.content?.find((b) => b.type === 'tool_use' && b.name === 'tokenwall_retrieve_content');
+        if (toolUseBlock) {
+            hasCCRToolCall = true;
+            toolCallId = toolUseBlock.id;
+            contentId = toolUseBlock.input?.content_id;
+        }
+    }
+    else if (provider === 'gemini') {
+        const part = resBody.candidates?.[0]?.content?.parts?.find((p) => p.functionCall?.name === 'tokenwall_retrieve_content');
+        if (part) {
+            hasCCRToolCall = true;
+            contentId = part.functionCall.args?.content_id;
+        }
+    }
+    if (hasCCRToolCall) {
+        console.log(`[CCR] Intercepted CCR tool call for content_id: ${contentId}`);
+        const originalContent = db.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+        if (provider === 'openai') {
+            requestBody.messages.push(resBody.choices[0].message);
+            requestBody.messages.push({
+                role: 'tool',
+                tool_call_id: toolCallId,
+                name: 'tokenwall_retrieve_content',
+                content: originalContent
+            });
+        }
+        else if (provider === 'anthropic') {
+            requestBody.messages.push({
+                role: 'assistant',
+                content: resBody.content
+            });
+            requestBody.messages.push({
+                role: 'user',
+                content: [{
+                        type: 'tool_result',
+                        tool_use_id: toolCallId,
+                        content: originalContent
+                    }]
+            });
+        }
+        else if (provider === 'gemini') {
+            requestBody.contents.push(resBody.candidates[0].content);
+            requestBody.contents.push({
+                role: 'user',
+                parts: [{
+                        functionResponse: {
+                            name: 'tokenwall_retrieve_content',
+                            response: { content: originalContent }
+                        }
+                    }]
+            });
+        }
+        return executeUpstreamRequest(provider, targetUrl, headers, requestBody);
+    }
+    return { response, resBody };
+}
+async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation) {
+    let inputAccumulated = 0;
+    let outputAccumulated = 0;
+    let streamFailed = false;
+    let streamCancelled = false;
+    return new ReadableStream({
+        async start(controller) {
+            async function runTurn(body) {
+                const response = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(body)
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Upstream error: ${response.status} - ${errorText}`);
+                }
+                const reader = response.body?.getReader();
+                if (!reader) {
+                    throw new Error('Response body is not readable');
+                }
+                let isCCRToolCall = false;
+                let ccrToolCallId = '';
+                let ccrArgsAccumulator = '';
+                let fullAssistantResponseForTurn = null;
+                let assistantTextAccumulated = '';
+                let assistantToolCallsAccumulated = [];
+                let anthropicContentBlocks = [];
+                const decoder = new TextDecoder();
+                const parser = (0, eventsource_parser_1.createParser)({
+                    onEvent: (event) => {
+                        const parsedChunk = providers_1.ProviderRegistry.parseStreamChunk(provider, event.data);
+                        if (parsedChunk?.usage) {
+                            if (parsedChunk.usage.inputTokens > 0)
+                                inputAccumulated = parsedChunk.usage.inputTokens;
+                            if (parsedChunk.usage.outputTokens > 0)
+                                outputAccumulated = parsedChunk.usage.outputTokens;
+                        }
+                        if (provider === 'openai') {
+                            try {
+                                const parsed = JSON.parse(event.data);
+                                const delta = parsed.choices?.[0]?.delta;
+                                if (delta?.tool_calls) {
+                                    for (const tc of delta.tool_calls) {
+                                        if (tc.function?.name === 'tokenwall_retrieve_content') {
+                                            isCCRToolCall = true;
+                                            ccrToolCallId = tc.id || ccrToolCallId;
+                                        }
+                                        let accTc = assistantToolCallsAccumulated.find(a => a.index === tc.index);
+                                        if (!accTc) {
+                                            accTc = { index: tc.index, id: tc.id, function: { name: tc.function?.name || '', arguments: '' } };
+                                            assistantToolCallsAccumulated.push(accTc);
+                                        }
+                                        if (tc.id)
+                                            accTc.id = tc.id;
+                                        if (tc.function?.name)
+                                            accTc.function.name = tc.function.name;
+                                        if (tc.function?.arguments)
+                                            accTc.function.arguments += tc.function.arguments;
+                                    }
+                                }
+                                if (delta?.content) {
+                                    assistantTextAccumulated += delta.content;
+                                }
+                            }
+                            catch { }
+                        }
+                        else if (provider === 'anthropic') {
+                            try {
+                                const parsed = JSON.parse(event.data);
+                                if (parsed.type === 'content_block_start') {
+                                    const block = parsed.content_block;
+                                    if (block?.type === 'tool_use') {
+                                        if (block.name === 'tokenwall_retrieve_content') {
+                                            isCCRToolCall = true;
+                                            ccrToolCallId = parsed.message?.id || block.id;
+                                        }
+                                        anthropicContentBlocks[parsed.index] = {
+                                            type: 'tool_use',
+                                            id: block.id,
+                                            name: block.name,
+                                            input: {}
+                                        };
+                                    }
+                                    else if (block?.type === 'text') {
+                                        anthropicContentBlocks[parsed.index] = {
+                                            type: 'text',
+                                            text: block.text || ''
+                                        };
+                                    }
+                                }
+                                else if (parsed.type === 'content_block_delta') {
+                                    const index = parsed.index;
+                                    const delta = parsed.delta;
+                                    if (delta?.type === 'text_delta') {
+                                        if (anthropicContentBlocks[index]) {
+                                            anthropicContentBlocks[index].text += delta.text;
+                                        }
+                                    }
+                                    else if (delta?.type === 'input_json_delta') {
+                                        ccrArgsAccumulator += delta.partial_json || '';
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                        else if (provider === 'gemini') {
+                            try {
+                                const parsed = JSON.parse(event.data);
+                                const part = parsed.candidates?.[0]?.content?.parts?.[0];
+                                if (part?.functionCall) {
+                                    if (part.functionCall.name === 'tokenwall_retrieve_content') {
+                                        isCCRToolCall = true;
+                                        ccrArgsAccumulator = JSON.stringify(part.functionCall.args);
+                                    }
+                                }
+                                fullAssistantResponseForTurn = parsed.candidates?.[0]?.content;
+                            }
+                            catch { }
+                        }
+                    }
+                });
+                const bufferChunks = [];
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            break;
+                        }
+                        const chunkText = decoder.decode(value, { stream: true });
+                        parser.feed(chunkText);
+                        bufferChunks.push(value);
+                    }
+                }
+                catch (err) {
+                    streamFailed = true;
+                    throw err;
+                }
+                if (isCCRToolCall) {
+                    let contentId = '';
+                    if (provider === 'openai') {
+                        const ccrCall = assistantToolCallsAccumulated.find(tc => tc.function.name === 'tokenwall_retrieve_content');
+                        if (ccrCall) {
+                            try {
+                                contentId = JSON.parse(ccrCall.function.arguments).content_id;
+                            }
+                            catch {
+                                contentId = ccrCall.function.arguments;
+                            }
+                            ccrToolCallId = ccrCall.id;
+                        }
+                    }
+                    else if (provider === 'anthropic') {
+                        try {
+                            contentId = JSON.parse(ccrArgsAccumulator).content_id;
+                        }
+                        catch {
+                            contentId = ccrArgsAccumulator;
+                        }
+                    }
+                    else if (provider === 'gemini') {
+                        try {
+                            contentId = JSON.parse(ccrArgsAccumulator).content_id;
+                        }
+                        catch {
+                            contentId = ccrArgsAccumulator;
+                        }
+                    }
+                    console.log(`[Stream CCR] Resolving content_id: ${contentId} in request ${requestId}`);
+                    const originalContent = db.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+                    if (provider === 'openai') {
+                        body.messages.push({
+                            role: 'assistant',
+                            content: assistantTextAccumulated || null,
+                            tool_calls: assistantToolCallsAccumulated.map(tc => ({
+                                id: tc.id,
+                                type: 'function',
+                                function: {
+                                    name: tc.function.name,
+                                    arguments: tc.function.arguments
+                                }
+                            }))
+                        });
+                        body.messages.push({
+                            role: 'tool',
+                            tool_call_id: ccrToolCallId,
+                            name: 'tokenwall_retrieve_content',
+                            content: originalContent
+                        });
+                    }
+                    else if (provider === 'anthropic') {
+                        const ccrBlockIndex = anthropicContentBlocks.findIndex(b => b.type === 'tool_use' && b.name === 'tokenwall_retrieve_content');
+                        if (ccrBlockIndex !== -1) {
+                            try {
+                                anthropicContentBlocks[ccrBlockIndex].input = JSON.parse(ccrArgsAccumulator);
+                            }
+                            catch {
+                                anthropicContentBlocks[ccrBlockIndex].input = { content_id: contentId };
+                            }
+                        }
+                        body.messages.push({
+                            role: 'assistant',
+                            content: anthropicContentBlocks
+                        });
+                        body.messages.push({
+                            role: 'user',
+                            content: [{
+                                    type: 'tool_result',
+                                    tool_use_id: ccrToolCallId || 'ccr_id',
+                                    content: originalContent
+                                }]
+                        });
+                    }
+                    else if (provider === 'gemini') {
+                        if (fullAssistantResponseForTurn) {
+                            body.contents.push(fullAssistantResponseForTurn);
+                        }
+                        body.contents.push({
+                            role: 'user',
+                            parts: [{
+                                    functionResponse: {
+                                        name: 'tokenwall_retrieve_content',
+                                        response: { content: originalContent }
+                                    }
+                                }]
+                        });
+                    }
+                    return runTurn(body);
+                }
+                else {
+                    for (const chunk of bufferChunks) {
+                        controller.enqueue(chunk);
+                    }
+                }
+            }
+            try {
+                await runTurn(requestBody);
+                telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
+                controller.close();
+            }
+            catch (err) {
+                streamFailed = true;
+                telemetryLogger.emitEvent({ eventType: 'provider_stream_interrupted', sessionId, requestId, metadata: { error: err?.message } });
+                controller.error(err);
+            }
+            finally {
+                if (inputAccumulated === 0)
+                    inputAccumulated = estimation.estimatedInputTokens;
+                if (outputAccumulated === 0)
+                    outputAccumulated = estimation.estimatedOutputTokens;
+                const pricing = (0, estimators_1.getPricingForModel)(finalModel);
+                const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
+                    ((outputAccumulated / 1000000) * pricing.outputPerMillion);
+                telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
+                db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
+                const status = streamFailed ? 'failed' : 'success';
+                const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
+                telemetryLogger.reconcileRequest(requestId, finalCost, status, state);
+                telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state, finalCost } });
+            }
+        },
+        cancel() {
+            streamCancelled = true;
+            telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
+            if (inputAccumulated === 0)
+                inputAccumulated = estimation.estimatedInputTokens;
+            db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated || 1);
+            telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'cancelled');
+            telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'cancelled' } });
+        }
+    });
+}
 async function handleInterception(provider, targetUrl, request, reply) {
     const sessionId = request.headers['x-tokenwall-session-id'] || 'default-session';
     const projectId = request.headers['x-tokenwall-project-id'] || null;
@@ -175,7 +677,8 @@ async function handleInterception(provider, targetUrl, request, reply) {
     const parsedRequest = providers_1.ProviderRegistry.parseRequest(provider, request.body, request.url);
     // Pre-flight validation
     const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
-    const contextReport = contextAnalyzer.analyze(parsedRequest);
+    const config = configManager.getConfig();
+    const contextReport = contextAnalyzer.analyze(parsedRequest, config);
     const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
     // Prompt Optimization (heuristic compression preview)
     const firstUserMsg = parsedRequest.messages.find(m => m.role === 'user');
@@ -242,7 +745,17 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Determine if we show interactive warning
     let action = 'approve';
     let chosenModel = undefined;
-    const needsWarning = estimation.estimatedCost >= 0.05 || budgetCheck.warnOnly || contextReport.inefficiencies.length > 0 || routingOptions.shouldRoute;
+    const hasCostWarning = estimation.estimatedCost >= 0.05;
+    const hasBudgetWarning = budgetCheck.warnOnly;
+    const hasRoutingWarning = routingOptions.shouldRoute;
+    const hasContextInefficiencies = contextReport.inefficiencies.length > 0;
+    let needsWarning = hasCostWarning || hasBudgetWarning || hasRoutingWarning || hasContextInefficiencies;
+    // Auto-Optimize Bypass: if autoOptimize is enabled and the only warning is context inefficiencies,
+    // we automatically optimize without warning the user/blocking via Control Plane.
+    if (config.autoOptimize && hasContextInefficiencies && !hasCostWarning && !hasBudgetWarning && !hasRoutingWarning) {
+        action = 'optimize';
+        needsWarning = false;
+    }
     if (needsWarning) {
         telemetryLogger.emitEvent({
             eventType: 'approval_requested',
@@ -318,7 +831,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (action === 'cancel') {
         telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
-        return sendBlockedResponse(reply, provider, 400, 'Request cancelled by user in TokenWall.', 'invalid_request_error', 'forbidden');
+        return sendBlockedResponse(reply, provider, 400, 'Request cancelled by user in TokenWall.', 'cancelled_by_user', 'forbidden');
     }
     let finalRequestBody = request.body;
     let finalRequest = parsedRequest;
@@ -345,6 +858,15 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
+        // Save CCR cached contents if any
+        if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
+            for (const cc of contextReport.cachedContents) {
+                db.saveCachedContent(cc.id, requestId, cc.content);
+            }
+            if (config.reversibleCompression !== false) {
+                injectCCRTool(provider, finalRequestBody);
+            }
+        }
         const pricing = (0, estimators_1.getPricingForModel)(parsedRequest.model);
         const savingsAmount = (savedTokens / 1000000) * pricing.inputPerMillion;
         const savingsId = Math.random().toString(36).substring(2, 11);
@@ -386,6 +908,14 @@ async function handleInterception(provider, targetUrl, request, reply) {
             tokens: 0
         });
     }
+    // Apply Output Token Reduction (Verbosity Steering)
+    if (config.verbositySteering !== false) {
+        injectVerbositySteering(provider, finalRequestBody);
+    }
+    // Apply Anthropic Caching Breakpoints
+    if (provider === 'anthropic' && config.cacheAlignment !== false) {
+        injectAnthropicCacheControl(finalRequestBody);
+    }
     // Mutate OpenAI Request to include stream_options if streaming
     if (provider === 'openai' && parsedRequest.stream) {
         finalRequestBody = {
@@ -401,29 +931,22 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
     }
     // Forward payload to destination API
-    let streamReconciled = false;
     telemetryLogger.emitEvent({ eventType: 'provider_request_sent', sessionId, requestId, provider, model: finalRequest.model });
     try {
-        const response = await fetch(targetUrl, {
-            method: 'POST',
-            headers: forwardHeaders,
-            body: JSON.stringify(finalRequestBody)
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
-            telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'failed');
-            telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
-            streamReconciled = true;
-            return reply.status(response.status).send(errorText);
-        }
-        // Set response headers
-        for (const [key, value] of response.headers.entries()) {
-            reply.header(key, value);
-        }
         if (!parsedRequest.stream) {
-            // Non-streaming response
-            const resBody = await response.json();
+            // Non-streaming response handling with CCR recursive check
+            const { response: upstreamRes, resBody } = await executeUpstreamRequest(provider, targetUrl, forwardHeaders, finalRequestBody);
+            if (!upstreamRes.ok) {
+                const errorText = await upstreamRes.text();
+                telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
+                telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'failed');
+                telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
+                return reply.status(upstreamRes.status).send(errorText);
+            }
+            // Set response headers
+            for (const [key, value] of upstreamRes.headers.entries()) {
+                reply.header(key, value);
+            }
             const normalizedRes = providers_1.ProviderRegistry.parseResponse(provider, resBody);
             const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
             const totalCost = ((normalizedRes.usage.inputTokens / 1000000) * pricing.inputPerMillion) +
@@ -433,112 +956,21 @@ async function handleInterception(provider, targetUrl, request, reply) {
             db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens);
             telemetryLogger.reconcileRequest(requestId, totalCost, 'success', 'reconciled');
             telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost: totalCost } });
-            streamReconciled = true;
             return reply.send(resBody);
         }
-        // Streaming Response proxy
+        // Streaming Response proxy with CCR recursive check
         telemetryLogger.emitEvent({ eventType: 'provider_stream_started', sessionId, requestId, provider, model: finalRequest.model });
         reply.header('content-type', 'text/event-stream');
         reply.header('cache-control', 'no-cache');
         reply.header('connection', 'keep-alive');
-        const reader = response.body?.getReader();
-        if (!reader) {
-            throw new Error('Response body is not readable');
-        }
-        let inputAccumulated = 0;
-        let outputAccumulated = 0;
-        let streamFailed = false;
-        let streamCancelled = false;
-        const decoder = new TextDecoder();
-        const stream = new ReadableStream({
-            async start(controller) {
-                // Robust SSE Parser
-                const parser = (0, eventsource_parser_1.createParser)({
-                    onEvent: (event) => {
-                        const parsedChunk = providers_1.ProviderRegistry.parseStreamChunk(provider, event.data);
-                        if (parsedChunk) {
-                            if (parsedChunk.text && parsedChunk.text.startsWith('[Tool Use:')) {
-                                console.log(`[Stream] [Tool Use] ${parsedChunk.text} detected for request ${requestId}`);
-                                const match = parsedChunk.text.match(/\[Tool Use:\s*([^\]]+)\]/);
-                                if (match) {
-                                    const toolName = match[1];
-                                    const toolCallId = Math.random().toString(36).substring(2, 11);
-                                    db.logToolCall(toolCallId, requestId, toolName, parsedChunk.text.length);
-                                }
-                            }
-                            if (parsedChunk.usage) {
-                                if (parsedChunk.usage.inputTokens > 0) {
-                                    inputAccumulated = parsedChunk.usage.inputTokens;
-                                    console.log(`[Stream] [Input Usage] Intercepted message_start usage inputTokens=${inputAccumulated} for request ${requestId}`);
-                                }
-                                if (parsedChunk.usage.outputTokens > 0) {
-                                    outputAccumulated = parsedChunk.usage.outputTokens;
-                                    console.log(`[Stream] [Output Usage] Intercepted message_delta usage outputTokens=${outputAccumulated} for request ${requestId}`);
-                                }
-                            }
-                        }
-                    }
-                });
-                try {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) {
-                            telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
-                            controller.close();
-                            break;
-                        }
-                        controller.enqueue(value);
-                        const chunkText = decoder.decode(value, { stream: true });
-                        parser.feed(chunkText);
-                    }
-                }
-                catch (err) {
-                    streamFailed = true;
-                    telemetryLogger.emitEvent({ eventType: 'provider_stream_interrupted', sessionId, requestId, metadata: { error: err?.message } });
-                    controller.error(err);
-                }
-                finally {
-                    if (!streamReconciled) {
-                        if (inputAccumulated === 0)
-                            inputAccumulated = estimation.estimatedInputTokens;
-                        if (outputAccumulated === 0)
-                            outputAccumulated = estimation.estimatedOutputTokens; // fallback
-                        const pricing = (0, estimators_1.getPricingForModel)(finalRequest.model);
-                        const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
-                            ((outputAccumulated / 1000000) * pricing.outputPerMillion);
-                        telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
-                        db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
-                        const status = streamFailed ? 'failed' : 'success';
-                        const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
-                        telemetryLogger.reconcileRequest(requestId, finalCost, status, state);
-                        telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state, finalCost } });
-                        console.log(`[Reconcile] Request ${requestId} resolved: state=${state}, cost=$${finalCost.toFixed(6)}, input=${inputAccumulated}, output=${outputAccumulated}`);
-                        streamReconciled = true;
-                    }
-                }
-            },
-            cancel() {
-                streamCancelled = true;
-                telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
-                reader.cancel();
-                if (!streamReconciled) {
-                    db.updateRequestTokens(requestId, inputAccumulated || estimation.estimatedInputTokens, outputAccumulated || 1);
-                    telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'cancelled');
-                    telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'cancelled' } });
-                    streamReconciled = true;
-                    console.log(`[Reconcile] Request ${requestId} cancelled mid-stream. Reservation reclaimed.`);
-                }
-            }
-        });
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation);
         return reply.send(stream);
     }
     catch (error) {
         console.error('Error forwarding request:', error);
-        if (!streamReconciled) {
-            telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error.message } });
-            telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');
-            telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
-        }
+        telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error.message } });
+        telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');
+        telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
         return reply.status(500).send({ error: { message: error.message } });
     }
 }
