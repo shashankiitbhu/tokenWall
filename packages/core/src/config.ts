@@ -43,7 +43,7 @@ const DEFAULT_CONFIG: TokenWallConfig = {
     '**/*.png',
     '**/*.jpg'
   ],
-  autoOptimize: true,
+  autoOptimize: false,
   headless: false,
   autoApproveLimit: 0.10,
   autoDenyLimit: 5.00,

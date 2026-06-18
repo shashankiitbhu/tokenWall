@@ -438,24 +438,57 @@ interface PendingApprovalRequest {
 
 async function handlePendingApproval(req: PendingApprovalRequest) {
   const costText = `$${req.estimatedCost.toFixed(4)}`;
-  const warningsList = req.warnings.length > 0 
-    ? `Warnings: ${req.warnings.map((w: any) => typeof w === 'string' ? w : w.description).join('; ')}` 
-    : '';
 
   const quickPick = vscode.window.createQuickPick();
-  quickPick.title = `TokenWall Intercept [${req.requestId}]`;
-  quickPick.placeholder = `Model: ${req.model} | Cost: ${costText} ${warningsList ? ' | ' + warningsList : ''}`;
+  quickPick.title = `🛡️ TokenWall Spend Intercept — ${req.model}`;
+  quickPick.placeholder = `Estimated request cost is ${costText}. Choose an action below:`;
 
-  const items: vscode.QuickPickItem[] = [
-    { label: 'Approve', description: 'Proceed with this request' }
-  ];
-  if (req.warnings.length > 0) {
-    items.push({ label: 'Optimize Prompt', description: 'Optimize prompt (strip waste) and proceed' });
-  }
+  const items: vscode.QuickPickItem[] = [];
+
+  // 1. Optimize Action
+  items.push({
+    label: `$(zap) Optimize Prompt & Proceed`,
+    description: 'Strip comments, minify JSON, and align cache prefixes losslessly',
+    detail: 'Bypasses waste to decrease latency and reduce token cost'
+  });
+
+  // 2. Approve Action
+  items.push({
+    label: `$(check) Approve As-Is`,
+    description: 'Proceed with this request as-is without optimizing context',
+    detail: `Proceed at full estimated cost of ${costText}`
+  });
+
+  // 3. Switch Model
   if (req.routingAlternatives && req.routingAlternatives.length > 0) {
-    items.push({ label: 'Switch Model', description: 'Switch to a cost-efficient model' });
+    items.push({
+      label: `$(git-compare) Switch Model`,
+      description: 'Switch to a cost-efficient model alternative',
+      detail: `Alternatives: ${req.routingAlternatives.map(alt => `${alt.model} (${alt.savingsPercentage}% saved)`).join(', ')}`
+    });
   }
-  items.push({ label: 'Cancel', description: 'Block this request' });
+
+  // 4. Cancel Action
+  items.push({
+    label: `$(x) Block Request`,
+    description: 'Block this request from hitting the provider API',
+    detail: 'Terminates this call to preserve remaining budget'
+  });
+
+  // 5. Warnings List
+  if (req.warnings && req.warnings.length > 0) {
+    items.push({
+      label: '⚠️ Spend Warnings & Inefficiencies Detected',
+      kind: vscode.QuickPickItemKind.Separator
+    });
+    for (const w of req.warnings) {
+      const desc = typeof w === 'string' ? w : (w as any).description || JSON.stringify(w);
+      items.push({
+        label: `  ${desc}`,
+        alwaysShow: true
+      });
+    }
+  }
 
   quickPick.items = items;
   quickPick.ignoreFocusOut = true;
@@ -466,7 +499,7 @@ async function handlePendingApproval(req: PendingApprovalRequest) {
 
   quickPick.onDidAccept(async () => {
     const selected = quickPick.selectedItems[0];
-    if (!selected) return;
+    if (!selected || selected.kind === vscode.QuickPickItemKind.Separator || selected.label.startsWith('  ')) return;
 
     resolved = true;
     quickPick.hide();
@@ -474,11 +507,11 @@ async function handlePendingApproval(req: PendingApprovalRequest) {
     let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'cancel';
     let chosenModel: string | undefined = undefined;
 
-    if (selected.label === 'Approve') {
+    if (selected.label.includes('Approve As-Is')) {
       action = 'approve';
-    } else if (selected.label === 'Optimize Prompt') {
+    } else if (selected.label.includes('Optimize Prompt')) {
       action = 'optimize';
-    } else if (selected.label === 'Switch Model' && req.routingAlternatives) {
+    } else if (selected.label.includes('Switch Model') && req.routingAlternatives) {
       const quickPickItems = req.routingAlternatives.map((alt) => ({
         label: alt.model,
         description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
@@ -705,7 +738,7 @@ function syncSettingsToConfigFile() {
     current.hardLimitsEnabled = settings.get<boolean>('hardLimitsEnabled', true);
     current.autoApproveLimit = settings.get<number>('autoApproveLimit', 0.10);
     current.autoDenyLimit = settings.get<number>('autoDenyLimit', 5.00);
-    current.autoOptimize = settings.get<boolean>('autoOptimize', true);
+    current.autoOptimize = settings.get<boolean>('autoOptimize', false);
 
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });

@@ -555,6 +555,11 @@
     "name": "go"
   },
   {
+    "id": "google.geminicodeassist",
+    "displayName": "Gemini Code Assist",
+    "name": "geminicodeassist"
+  },
+  {
     "id": "isudox.vscode-jetbrains-keybindings",
     "displayName": "JetBrains IDE Keymap",
     "name": "vscode-jetbrains-keybindings"
