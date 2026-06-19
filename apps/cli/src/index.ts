@@ -183,7 +183,11 @@ async function main() {
     console.log(cGray('─'.repeat(50)));
 
     // 3. Spawn the child agent process
-    const agentProcess = spawn(cmdName, cmdArgs, { stdio: 'inherit', env });
+    const agentProcess = spawn(cmdName, cmdArgs, {
+      stdio: 'inherit',
+      env,
+      shell: process.platform === 'win32'
+    });
 
     agentProcess.on('exit', (code) => {
       console.log('\n' + cBold(cGreen('─'.repeat(50))));

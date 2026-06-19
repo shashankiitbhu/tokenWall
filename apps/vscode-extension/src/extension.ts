@@ -216,13 +216,39 @@ function launchDaemon(context: vscode.ExtensionContext) {
   if (gatewayPath) {
     strategies.push({ name: 'localGateway', cmd: 'node', args: [gatewayPath] });
   } else {
-    // Try global tokenwall command
-    const globalCmd = process.platform === 'win32' ? 'tokenwall.cmd' : 'tokenwall';
-    strategies.push({ name: 'globalTokenWall', cmd: globalCmd, args: ['start'] });
+    if (process.platform === 'win32') {
+      // On Windows, VS Code's extension host may not have npm's global bin
+      // in its PATH. Try the explicit %APPDATA%\npm path first.
+      const appData = process.env.APPDATA;
+      if (appData) {
+        const explicitCmd = path.join(appData, 'npm', 'tokenwall.cmd');
+        const fs = require('fs');
+        if (fs.existsSync(explicitCmd)) {
+          strategies.push({ name: 'globalTokenWall', cmd: explicitCmd, args: ['start'] });
+        }
+      }
+      // Also try PATH-based resolution
+      strategies.push({ name: 'globalTokenWall', cmd: 'tokenwall.cmd', args: ['start'] });
+    } else {
+      strategies.push({ name: 'globalTokenWall', cmd: 'tokenwall', args: ['start'] });
+    }
 
     // Fall back to npx
     const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
     strategies.push({ name: 'npxFallback', cmd: npxCmd, args: ['--yes', 'tokenwall', 'start'] });
+  }
+
+  // On Windows, build an enhanced PATH that includes npm's global bin directory
+  const spawnEnv: Record<string, string | undefined> = { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' };
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    const npmGlobalBin = path.join(process.env.APPDATA, 'npm');
+    // Find the actual PATH key (Windows uses 'Path', not 'PATH')
+    const pathKey = Object.keys(process.env).find(k => k.toUpperCase() === 'PATH') || 'Path';
+    const currentPath = spawnEnv[pathKey] || '';
+    if (!currentPath.includes(npmGlobalBin)) {
+      spawnEnv[pathKey] = `${npmGlobalBin};${currentPath}`;
+      daemonOutputChannel?.appendLine(`[Daemon Manager] Added npm global bin to PATH: ${npmGlobalBin}`);
+    }
   }
 
   function attemptSpawn(index: number) {
@@ -250,8 +276,8 @@ function launchDaemon(context: vscode.ExtensionContext) {
 
     const child = spawn(strategy.cmd, strategy.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: strategy.useShell || false,
-      env: { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' }
+      shell: strategy.useShell || process.platform === 'win32',
+      env: spawnEnv
     });
 
     daemonProcess = child;

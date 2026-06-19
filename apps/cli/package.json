@@ -1,14 +1,18 @@
 {
   "name": "tokenwall",
-  "version": "1.0.6",
+  "version": "1.0.10",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "tokenwall": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "dashboard"
+  ],
   "scripts": {
     "start": "node dist/index.js",
-    "build": "ncc build src/index.ts -o dist -m -e better-sqlite3"
+    "build": "node build.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1"

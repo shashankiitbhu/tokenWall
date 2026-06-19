@@ -25,7 +25,7 @@ const DEFAULT_CONFIG = {
         '**/*.png',
         '**/*.jpg'
     ],
-    autoOptimize: true,
+    autoOptimize: false,
     headless: false,
     autoApproveLimit: 0.10,
     autoDenyLimit: 5.00,

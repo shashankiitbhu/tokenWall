@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const fastify_1 = __importDefault(require("fastify"));
+const fs_1 = __importDefault(require("fs"));
 const core_1 = require("@tokenwall/core");
 const providers_1 = require("@tokenwall/providers");
 const estimators_1 = require("@tokenwall/estimators");
@@ -22,8 +23,20 @@ const control_plane_js_1 = require("./control-plane.js");
 const server = (0, fastify_1.default)({ logger: false });
 server.register(cors_1.default, { origin: '*' });
 server.register(websocket_1.default);
+const getDashboardPath = () => {
+    const devPath = path_1.default.join(__dirname, '../../dashboard/dist');
+    if (fs_1.default.existsSync(devPath))
+        return devPath;
+    const prodPath = path_1.default.join(__dirname, '../dashboard');
+    if (fs_1.default.existsSync(prodPath))
+        return prodPath;
+    const cliProdPath = path_1.default.join(__dirname, '../dashboard/dist');
+    if (fs_1.default.existsSync(cliProdPath))
+        return cliProdPath;
+    return devPath; // Fallback
+};
 server.register(static_1.default, {
-    root: path_1.default.join(__dirname, '../../dashboard/dist'),
+    root: getDashboardPath(),
     prefix: '/dashboard/',
 });
 server.register(async function (f) {

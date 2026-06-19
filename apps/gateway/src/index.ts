@@ -1,4 +1,5 @@
 import fastify from 'fastify';
+import fs from 'fs';
 import { DBManager, ConfigManager, TokenWallConfig } from '@tokenwall/core';
 import { ProviderRegistry, NormalizedRequest, NormalizedResponse } from '@tokenwall/providers';
 import { calculatePreFlightEstimation, getPricingForModel } from '@tokenwall/estimators';
@@ -18,8 +19,19 @@ import { controlPlane } from './control-plane.js';
 const server = fastify({ logger: false });
 server.register(cors as any, { origin: '*' });
 server.register(fastifyWebsocket as any);
+
+const getDashboardPath = () => {
+  const devPath = path.join(__dirname, '../../dashboard/dist');
+  if (fs.existsSync(devPath)) return devPath;
+  const prodPath = path.join(__dirname, '../dashboard');
+  if (fs.existsSync(prodPath)) return prodPath;
+  const cliProdPath = path.join(__dirname, '../dashboard/dist');
+  if (fs.existsSync(cliProdPath)) return cliProdPath;
+  return devPath; // Fallback
+};
+
 server.register(fastifyStatic as any, {
-  root: path.join(__dirname, '../../dashboard/dist'),
+  root: getDashboardPath(),
   prefix: '/dashboard/',
 });
 server.register(async function (f) {
