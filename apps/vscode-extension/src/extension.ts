@@ -821,10 +821,21 @@ async function autoConfigureAIExtensions() {
   // 3. Check for Claude Code extension
   const claudeCodeExt = extensions.find(e => e.id.toLowerCase() === 'anthropic.claude-code' || e.id.toLowerCase().includes('claude-code'));
   if (claudeCodeExt) {
-    const config = vscode.workspace.getConfiguration('claude-code');
-    let envVars = config.get<Array<{ name: string; value: string }>>('environmentVariables') || [];
-    const hasBaseUrl = envVars.some(v => v.name === 'ANTHROPIC_BASE_URL');
+    const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    let hasBaseUrl = false;
+    let claudeSettings: any = {};
     
+    if (fs.existsSync(claudeSettingsPath)) {
+      try {
+        claudeSettings = JSON.parse(fs.readFileSync(claudeSettingsPath, 'utf8'));
+        if (claudeSettings.env && claudeSettings.env.ANTHROPIC_BASE_URL) {
+          hasBaseUrl = true;
+        }
+      } catch (e) {
+        console.error('Failed to parse ~/.claude/settings.json', e);
+      }
+    }
+
     if (!hasBaseUrl) {
       const opt = await vscode.window.showInformationMessage(
         'TokenWall detected the Claude Code extension. Enable automatic spend protection and loop blocking for Claude Code?',
@@ -832,10 +843,22 @@ async function autoConfigureAIExtensions() {
         'No'
       );
       if (opt === 'Enable Protection') {
-        const updatedEnvVars = [...envVars];
-        updatedEnvVars.push({ name: 'ANTHROPIC_BASE_URL', value: 'http://127.0.0.1:1984' });
-        await config.update('environmentVariables', updatedEnvVars, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage('TokenWall spend protection enabled for Claude Code!');
+        if (!claudeSettings.env) {
+          claudeSettings.env = {};
+        }
+        claudeSettings.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:1984';
+        
+        try {
+          const claudeDir = path.dirname(claudeSettingsPath);
+          if (!fs.existsSync(claudeDir)) {
+            fs.mkdirSync(claudeDir, { recursive: true });
+          }
+          fs.writeFileSync(claudeSettingsPath, JSON.stringify(claudeSettings, null, 2), 'utf8');
+          vscode.window.showInformationMessage('TokenWall spend protection enabled for Claude Code!');
+        } catch (e) {
+          console.error('Failed to update ~/.claude/settings.json', e);
+          vscode.window.showErrorMessage('Failed to configure Claude Code. Please manually add ANTHROPIC_BASE_URL to your ~/.claude/settings.json.');
+        }
       }
     }
   }
