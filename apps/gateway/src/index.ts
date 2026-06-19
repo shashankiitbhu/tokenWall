@@ -853,15 +853,6 @@ async function handleInterception(
       }
     } else {
       // Interactive mode via Control Plane
-      let clientDisconnected = false;
-      const onDisconnect = () => {
-        clientDisconnected = true;
-        // DO NOT cancel the approval here! Let the dialog stay open for the user.
-        // If the user approves it, we will cache the approval for Claude Code's immediate retry!
-      };
-      request.raw.on('aborted', onDisconnect);
-      request.raw.on('close', onDisconnect);
-
       const result = await controlPlane.requestApproval({
         requestId,
         projectId,
@@ -872,9 +863,10 @@ async function handleInterception(
         routingAlternatives: routingOptions.alternatives
       });
 
-      request.socket.off('close', onDisconnect);
+      // Check if the client disconnected while we were waiting for approval
+      const isDisconnected = request.raw.aborted || request.raw.socket.destroyed;
 
-      if (clientDisconnected) {
+      if (isDisconnected) {
         telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
         telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
         return sendBlockedResponse(
@@ -1075,6 +1067,12 @@ async function handleInterception(
 
     return reply.send(stream);
   } catch (error: any) {
+    if (request.raw.aborted || request.raw.socket.destroyed) {
+      console.log('Client aborted request stream mid-flight.');
+      telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
+      telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
+      return;
+    }
     console.error('Error forwarding request:', error);
     telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error.message } });
     telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');

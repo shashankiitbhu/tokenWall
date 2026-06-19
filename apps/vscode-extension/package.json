@@ -2,7 +2,7 @@
   "name": "tokenwall-vscode",
   "displayName": "TokenWall",
   "description": "Seamless editor-native AI spend prevention and budget governance for coding agents",
-  "version": "1.0.15",
+  "version": "1.0.18",
   "publisher": "tokenwall",
   "icon": "icon.png",
   "license": "MIT",

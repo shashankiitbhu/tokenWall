@@ -10,6 +10,7 @@ let wsClient: WebSocket | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 let pollTimer: NodeJS.Timeout | null = null;
+let pingInterval: NodeJS.Timeout | null = null;
 let isConnected = false;
 const activeQuickPicks = new Map<string, any>();
 let daemonOutputChannel: vscode.OutputChannel | null = null;
@@ -384,11 +385,10 @@ function stopDaemon() {
 // -------------------------------------------------------------
 // WebSocket Control Plane IPC Client
 // -------------------------------------------------------------
+
 function connectControlPlane(context: vscode.ExtensionContext) {
   if (wsClient) {
-    try {
-      wsClient.close();
-    } catch {}
+    try { wsClient.close(); } catch {}
   }
 
   wsClient = new WebSocket('ws://127.0.0.1:1984/ws/control');
@@ -399,14 +399,26 @@ function connectControlPlane(context: vscode.ExtensionContext) {
     daemonCrashCount = 0;
     isSpawning = false;
     console.log('WS Connection to TokenWall Control Plane established.');
+    updateStatusBarText('Active', 'green');
     fetchStatsAndUpdateUI();
+    
+    // Start ping interval
+    if (pingInterval) clearInterval(pingInterval);
+    pingInterval = setInterval(() => {
+      if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+        wsClient.ping();
+      }
+    }, 15000); // 15 second ping to keep connection alive
   });
 
-  wsClient.on('message', async (data) => {
+  wsClient.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'approval_pending') {
-        await handlePendingApproval(msg.payload);
+        const req = msg.payload as PendingApprovalRequest;
+        if (!activeQuickPicks.has(req.requestId)) {
+          handlePendingApproval(req);
+        }
       } else if (msg.type === 'approval_cleared') {
         const { requestId } = msg.payload;
         const qp = activeQuickPicks.get(requestId);
@@ -423,13 +435,14 @@ function connectControlPlane(context: vscode.ExtensionContext) {
           vscode.window.showInformationMessage(message);
         }
       }
-    } catch (e) {
-      console.error('Failed to parse websocket message', e);
+    } catch (err) {
+      console.error('Invalid WS message', err);
     }
   });
 
   wsClient.on('close', () => {
     isConnected = false;
+    if (pingInterval) clearInterval(pingInterval);
     updateStatusBarText('Reconnecting...', 'yellow');
     
     // Retry connection after 3 seconds
@@ -462,135 +475,160 @@ interface PendingApprovalRequest {
   }>;
 }
 
-async function handlePendingApproval(req: PendingApprovalRequest) {
-  const costText = `$${req.estimatedCost.toFixed(4)}`;
+let isShowingQuickPick = false;
+const pendingQueue: PendingApprovalRequest[] = [];
 
-  const quickPick = vscode.window.createQuickPick();
-  quickPick.title = `🛡️ TokenWall Spend Intercept — ${req.model}`;
-  quickPick.placeholder = `Estimated request cost is ${costText}. Choose an action below:`;
-
-  const items: vscode.QuickPickItem[] = [];
-
-  // 1. Optimize Action
-  items.push({
-    label: `$(zap) Optimize Prompt & Proceed`,
-    description: 'Strip comments, minify JSON, and align cache prefixes losslessly',
-    detail: 'Bypasses waste to decrease latency and reduce token cost'
-  });
-
-  // 2. Approve Action
-  items.push({
-    label: `$(check) Approve As-Is`,
-    description: 'Proceed with this request as-is without optimizing context',
-    detail: `Proceed at full estimated cost of ${costText}`
-  });
-
-  // 3. Switch Model
-  if (req.routingAlternatives && req.routingAlternatives.length > 0) {
-    items.push({
-      label: `$(git-compare) Switch Model`,
-      description: 'Switch to a cost-efficient model alternative',
-      detail: `Alternatives: ${req.routingAlternatives.map(alt => `${alt.model} (${alt.savingsPercentage}% saved)`).join(', ')}`
-    });
-  }
-
-  // 4. Cancel Action
-  items.push({
-    label: `$(x) Block Request`,
-    description: 'Block this request from hitting the provider API',
-    detail: 'Terminates this call to preserve remaining budget'
-  });
-
-  // 5. Warnings List
-  if (req.warnings && req.warnings.length > 0) {
-    items.push({
-      label: '⚠️ Spend Warnings & Inefficiencies Detected',
-      kind: vscode.QuickPickItemKind.Separator
-    });
-    for (const w of req.warnings) {
-      const desc = typeof w === 'string' ? w : (w as any).description || JSON.stringify(w);
-      items.push({
-        label: `  ${desc}`,
-        alwaysShow: true
-      });
+async function processQueue() {
+  if (isShowingQuickPick || pendingQueue.length === 0) return;
+  isShowingQuickPick = true;
+  
+  try {
+    const req = pendingQueue.shift()!;
+    await showApprovalUI(req);
+  } finally {
+    isShowingQuickPick = false;
+    if (pendingQueue.length > 0) {
+      setTimeout(processQueue, 100);
     }
   }
+}
 
-  quickPick.items = items;
-  quickPick.ignoreFocusOut = true;
+function showApprovalUI(req: PendingApprovalRequest): Promise<void> {
+  return new Promise((resolve) => {
+    const costText = `$${req.estimatedCost.toFixed(4)}`;
 
-  activeQuickPicks.set(req.requestId, quickPick);
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.title = `🛡️ TokenWall Spend Intercept — ${req.model}`;
+    quickPick.placeholder = `Estimated request cost is ${costText}. Choose an action below:`;
 
-  let resolved = false;
+    const items: vscode.QuickPickItem[] = [];
 
-  quickPick.onDidAccept(async () => {
-    const selected = quickPick.selectedItems[0];
-    if (!selected || selected.kind === vscode.QuickPickItemKind.Separator || selected.label.startsWith('  ')) return;
+    items.push({
+      label: `$(zap) Optimize Prompt & Proceed`,
+      description: 'Strip comments, minify JSON, and align cache prefixes losslessly',
+      detail: 'Bypasses waste to decrease latency and reduce token cost'
+    });
 
-    resolved = true;
-    quickPick.hide();
+    items.push({
+      label: `$(check) Approve As-Is`,
+      description: 'Proceed with this request as-is without optimizing context',
+      detail: `Proceed at full estimated cost of ${costText}`
+    });
 
-    let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'cancel';
-    let chosenModel: string | undefined = undefined;
-
-    if (selected.label.includes('Approve As-Is')) {
-      action = 'approve';
-    } else if (selected.label.includes('Optimize Prompt')) {
-      action = 'optimize';
-    } else if (selected.label.includes('Switch Model') && req.routingAlternatives) {
-      const quickPickItems = req.routingAlternatives.map((alt) => ({
-        label: alt.model,
-        description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
-        detail: `Quality Level: ${alt.qualityLevel}`,
-        modelName: alt.model
-      }));
-
-      const picked = await vscode.window.showQuickPick(quickPickItems, {
-        title: 'Select Cost-Efficient Model Alternative',
-        placeHolder: `Switch from ${req.model}`
+    if (req.routingAlternatives && req.routingAlternatives.length > 0) {
+      items.push({
+        label: `$(git-compare) Switch Model`,
+        description: 'Switch to a cost-efficient model alternative',
+        detail: `Alternatives: ${req.routingAlternatives.map(alt => `${alt.model} (${alt.savingsPercentage}% saved)`).join(', ')}`
       });
+    }
 
-      if (picked) {
-        action = 'switch_model';
-        chosenModel = picked.modelName;
-      } else {
-        action = 'cancel';
+    items.push({
+      label: `$(x) Block Request`,
+      description: 'Block this request from hitting the provider API',
+      detail: 'Terminates this call to preserve remaining budget'
+    });
+
+    if (req.warnings && req.warnings.length > 0) {
+      items.push({
+        label: '⚠️ Spend Warnings & Inefficiencies Detected',
+        kind: vscode.QuickPickItemKind.Separator
+      });
+      for (const w of req.warnings) {
+        const desc = typeof w === 'string' ? w : (w as any).description || JSON.stringify(w);
+        items.push({
+          label: `  ${desc}`,
+          alwaysShow: true
+        });
       }
     }
 
-    if (wsClient && wsClient.readyState === WebSocket.OPEN) {
-      wsClient.send(
-        JSON.stringify({
-          type: 'approval_resolved',
-          payload: {
-            requestId: req.requestId,
-            action,
-            chosenModel
-          }
-        })
-      );
-    }
-  });
+    quickPick.items = items;
+    quickPick.ignoreFocusOut = true;
 
-  quickPick.onDidHide(() => {
-    if (!resolved) {
+    activeQuickPicks.set(req.requestId, quickPick);
+
+    let isResolving = false;
+
+    quickPick.onDidAccept(async () => {
+      const selected = quickPick.selectedItems[0];
+      if (!selected || selected.kind === vscode.QuickPickItemKind.Separator || selected.label.startsWith('  ')) return;
+
+      isResolving = true;
+      quickPick.hide();
+
+      let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'cancel';
+      let chosenModel: string | undefined = undefined;
+
+      if (selected.label.includes('Approve As-Is')) {
+        action = 'approve';
+      } else if (selected.label.includes('Optimize Prompt')) {
+        action = 'optimize';
+      } else if (selected.label.includes('Switch Model') && req.routingAlternatives) {
+        const quickPickItems = req.routingAlternatives.map((alt) => ({
+          label: alt.model,
+          description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
+          detail: `Quality Level: ${alt.qualityLevel}`,
+          modelName: alt.model
+        }));
+
+        const picked = await vscode.window.showQuickPick(quickPickItems, {
+          title: 'Select Cost-Efficient Model Alternative',
+          placeHolder: `Switch from ${req.model}`
+        });
+
+        if (picked) {
+          action = 'switch_model';
+          chosenModel = picked.modelName;
+        } else {
+          action = 'cancel';
+        }
+      }
+
       if (wsClient && wsClient.readyState === WebSocket.OPEN) {
         wsClient.send(
           JSON.stringify({
             type: 'approval_resolved',
             payload: {
               requestId: req.requestId,
-              action: 'cancel'
+              action,
+              chosenModel
             }
           })
         );
       }
-    }
-    activeQuickPicks.delete(req.requestId);
-    quickPick.dispose();
-  });
+      
+      activeQuickPicks.delete(req.requestId);
+      quickPick.dispose();
+      resolve();
+    });
 
-  quickPick.show();
+    quickPick.onDidHide(() => {
+      if (!isResolving) {
+        if (wsClient && wsClient.readyState === WebSocket.OPEN) {
+          wsClient.send(
+            JSON.stringify({
+              type: 'approval_resolved',
+              payload: {
+                requestId: req.requestId,
+                action: 'cancel'
+              }
+            })
+          );
+        }
+        activeQuickPicks.delete(req.requestId);
+        quickPick.dispose();
+        resolve();
+      }
+    });
+
+    quickPick.show();
+  });
+}
+
+async function handlePendingApproval(req: PendingApprovalRequest) {
+  pendingQueue.push(req);
+  processQueue();
 }
 
 // -------------------------------------------------------------

@@ -46865,12 +46865,6 @@ ${steeringMsg}`;
             telemetryLogger.emitEvent({ eventType: "auto_denied", sessionId, requestId, metadata: { reason: "outside_auto_approve_bounds" } });
           }
         } else {
-          let clientDisconnected = false;
-          const onDisconnect = () => {
-            clientDisconnected = true;
-          };
-          request.raw.on("aborted", onDisconnect);
-          request.raw.on("close", onDisconnect);
           const result = await control_plane_js_1.controlPlane.requestApproval({
             requestId,
             projectId,
@@ -46880,8 +46874,8 @@ ${steeringMsg}`;
             warnings: contextReport.inefficiencies,
             routingAlternatives: routingOptions.alternatives
           });
-          request.socket.off("close", onDisconnect);
-          if (clientDisconnected) {
+          const isDisconnected = request.raw.aborted || request.raw.socket.destroyed;
+          if (isDisconnected) {
             telemetryLogger.emitEvent({ eventType: "request_stream_cancelled", sessionId, requestId });
             telemetryLogger.reconcileRequest(requestId, 0, "blocked", "cancelled");
             return sendBlockedResponse(reply, provider, 499, "Client disconnected during approval.", "client_disconnected", "client_closed_request");

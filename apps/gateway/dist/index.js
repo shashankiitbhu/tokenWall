@@ -810,14 +810,6 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         else {
             // Interactive mode via Control Plane
-            let clientDisconnected = false;
-            const onDisconnect = () => {
-                clientDisconnected = true;
-                // DO NOT cancel the approval here! Let the dialog stay open for the user.
-                // If the user approves it, we will cache the approval for Claude Code's immediate retry!
-            };
-            request.raw.on('aborted', onDisconnect);
-            request.raw.on('close', onDisconnect);
             const result = await control_plane_js_1.controlPlane.requestApproval({
                 requestId,
                 projectId,
@@ -827,8 +819,9 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 warnings: contextReport.inefficiencies,
                 routingAlternatives: routingOptions.alternatives
             });
-            request.socket.off('close', onDisconnect);
-            if (clientDisconnected) {
+            // Check if the client disconnected while we were waiting for approval
+            const isDisconnected = request.raw.aborted || request.raw.socket.destroyed;
+            if (isDisconnected) {
                 telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
                 telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
                 return sendBlockedResponse(reply, provider, 499, 'Client disconnected during approval.', 'client_disconnected', 'client_closed_request');
