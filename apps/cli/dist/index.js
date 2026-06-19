@@ -46394,6 +46394,9 @@ ${steeringMsg}`;
       }
     }
     function injectAnthropicCacheControl(body) {
+      if (JSON.stringify(body).includes('"cache_control"')) {
+        return;
+      }
       if (body.system) {
         if (typeof body.system === "string") {
           body.system = [

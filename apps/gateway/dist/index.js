@@ -275,6 +275,11 @@ function injectVerbositySteering(provider, body) {
     }
 }
 function injectAnthropicCacheControl(body) {
+    // If the client (like Claude Code) natively uses prompt caching, do NOT interfere.
+    // Anthropic has a strict limit of 4 cache_control blocks per request.
+    if (JSON.stringify(body).includes('"cache_control"')) {
+        return;
+    }
     if (body.system) {
         if (typeof body.system === 'string') {
             body.system = [
