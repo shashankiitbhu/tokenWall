@@ -813,9 +813,11 @@ async function handleInterception(provider, targetUrl, request, reply) {
             let clientDisconnected = false;
             const onDisconnect = () => {
                 clientDisconnected = true;
-                control_plane_js_1.controlPlane.cancelApproval(requestId);
+                // DO NOT cancel the approval here! Let the dialog stay open for the user.
+                // If the user approves it, we will cache the approval for Claude Code's immediate retry!
             };
-            request.socket.on('close', onDisconnect);
+            request.raw.on('aborted', onDisconnect);
+            request.raw.on('close', onDisconnect);
             const result = await control_plane_js_1.controlPlane.requestApproval({
                 requestId,
                 projectId,

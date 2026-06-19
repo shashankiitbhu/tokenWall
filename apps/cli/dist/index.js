@@ -46012,6 +46012,7 @@ var require_control_plane = __commonJS({
     var ControlPlane = class {
       clients = /* @__PURE__ */ new Set();
       pendingApprovals = /* @__PURE__ */ new Map();
+      approvalCache = /* @__PURE__ */ new Map();
       registerWebsocket(fastify) {
         fastify.get("/ws/control", { websocket: true }, (connection, req) => {
           console.log("WS Connection established on server");
@@ -46030,8 +46031,13 @@ var require_control_plane = __commonJS({
                 const { requestId, action, chosenModel } = data.payload;
                 const pending = this.pendingApprovals.get(requestId);
                 if (pending) {
+                  const req2 = pending.request;
                   pending.resolve({ action, chosenModel });
                   this.pendingApprovals.delete(requestId);
+                  if (action !== "cancel") {
+                    const cacheKey = `${req2.sessionId}:${req2.model}:${req2.estimatedCost.toFixed(4)}`;
+                    this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 12e4 });
+                  }
                   this.broadcast({ type: "approval_cleared", payload: { requestId } });
                 }
               }
@@ -46046,6 +46052,12 @@ var require_control_plane = __commonJS({
       }
       requestApproval(request) {
         console.log("Requesting approval for", request.requestId);
+        const cacheKey = `${request.sessionId}:${request.model}:${request.estimatedCost.toFixed(4)}`;
+        const cached = this.approvalCache.get(cacheKey);
+        if (cached && cached.expires > Date.now()) {
+          console.log(`Using cached approval for ${cacheKey}`);
+          return Promise.resolve({ action: cached.action, chosenModel: cached.chosenModel });
+        }
         if (this.clients.size === 0) {
           console.log("No control plane client connected. Falling back to native OS dialog...");
           return new Promise(async (resolve) => {
@@ -46053,6 +46065,9 @@ var require_control_plane = __commonJS({
             let chosenModel = void 0;
             if (action === "switch_model" && request.routingAlternatives && request.routingAlternatives.length > 0) {
               chosenModel = request.routingAlternatives[0].model;
+            }
+            if (action !== "cancel") {
+              this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 12e4 });
             }
             resolve({ action, chosenModel });
           });
@@ -46853,9 +46868,9 @@ ${steeringMsg}`;
           let clientDisconnected = false;
           const onDisconnect = () => {
             clientDisconnected = true;
-            control_plane_js_1.controlPlane.cancelApproval(requestId);
           };
-          request.socket.on("close", onDisconnect);
+          request.raw.on("aborted", onDisconnect);
+          request.raw.on("close", onDisconnect);
           const result = await control_plane_js_1.controlPlane.requestApproval({
             requestId,
             projectId,

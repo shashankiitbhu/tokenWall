@@ -11,6 +11,7 @@ export interface ApprovalRequest {
 export declare class ControlPlane {
     private clients;
     private pendingApprovals;
+    private approvalCache;
     registerWebsocket(fastify: FastifyInstance): void;
     requestApproval(request: ApprovalRequest): Promise<{
         action: 'approve' | 'optimize' | 'switch_model' | 'cancel';
