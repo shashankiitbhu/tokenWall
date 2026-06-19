@@ -46,8 +46,7 @@ export class ControlPlane {
               this.pendingApprovals.delete(requestId);
               // Cache the approval for 60 seconds to handle client retries
               if (action !== 'cancel') {
-                const approxCost = (Math.round(req.estimatedCost * 100) / 100).toFixed(2);
-                const cacheKey = `${req.sessionId}:${req.model}:${approxCost}`;
+                const cacheKey = `${req.sessionId}:${req.model}`;
                 this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 60000 });
               }
               // Broadcast resolution to other clients
@@ -68,10 +67,10 @@ export class ControlPlane {
   requestApproval(request: ApprovalRequest): Promise<{ action: 'approve' | 'optimize' | 'switch_model' | 'cancel', chosenModel?: string }> {
     console.log('Requesting approval for', request.requestId);
     
-    // Use an approximate cost (rounded to 2 decimals) so that minor token fluctuations 
-    // (like timestamps injected by Claude Code on retries) still hit the cache!
-    const approxCost = (Math.round(request.estimatedCost * 100) / 100).toFixed(2);
-    const cacheKey = `${request.sessionId}:${request.model}:${approxCost}`;
+    // Cache strictly by session and model. This allows parallel fanned-out requests 
+    // and retries from autonomous agents to coalesce into a single approval dialog.
+    // The budget evaluator runs before this, so total budget is still strictly enforced.
+    const cacheKey = `${request.sessionId}:${request.model}`;
     
     const cached = this.approvalCache.get(cacheKey);
     if (cached && cached.expires > Date.now()) {

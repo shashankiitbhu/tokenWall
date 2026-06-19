@@ -412,7 +412,9 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                 });
                 if (!response.ok) {
                     const errorText = await response.text();
-                    throw new Error(`Upstream error: ${response.status} - ${errorText}`);
+                    const err = new Error(`Upstream error: ${response.status} - ${errorText}`);
+                    err.statusCode = response.status;
+                    throw err;
                 }
                 const reader = response.body?.getReader();
                 if (!reader) {
@@ -975,11 +977,19 @@ async function handleInterception(provider, targetUrl, request, reply) {
         return reply.send(stream);
     }
     catch (error) {
+        const isUpstreamError = error?.message && error.message.includes('Upstream error:');
+        if (!isUpstreamError && (request.raw.aborted || request.raw.socket.destroyed)) {
+            console.log('Client aborted request stream mid-flight.');
+            telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
+            telemetryLogger.reconcileRequest(requestId, 0, 'blocked', 'cancelled');
+            return;
+        }
         console.error('Error forwarding request:', error);
-        telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error.message } });
+        telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, metadata: { error: error?.message } });
         telemetryLogger.reconcileRequest(requestId, 0, 'failed', 'failed');
         telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
-        return reply.status(500).send({ error: { message: error.message } });
+        const status = error?.statusCode || 500;
+        return reply.status(status).send({ error: { message: error?.message || 'Unknown error' } });
     }
 }
 function sendBlockedResponse(reply, provider, statusCode, message, errorType, errorCode) {

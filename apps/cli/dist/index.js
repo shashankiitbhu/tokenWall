@@ -46013,6 +46013,7 @@ var require_control_plane = __commonJS({
       clients = /* @__PURE__ */ new Set();
       pendingApprovals = /* @__PURE__ */ new Map();
       approvalCache = /* @__PURE__ */ new Map();
+      inflightApprovals = /* @__PURE__ */ new Map();
       registerWebsocket(fastify) {
         fastify.get("/ws/control", { websocket: true }, (connection, req) => {
           console.log("WS Connection established on server");
@@ -46035,8 +46036,8 @@ var require_control_plane = __commonJS({
                   pending.resolve({ action, chosenModel });
                   this.pendingApprovals.delete(requestId);
                   if (action !== "cancel") {
-                    const cacheKey = `${req2.sessionId}:${req2.model}:${req2.estimatedCost.toFixed(4)}`;
-                    this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 12e4 });
+                    const cacheKey = `${req2.sessionId}:${req2.model}`;
+                    this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 6e4 });
                   }
                   this.broadcast({ type: "approval_cleared", payload: { requestId } });
                 }
@@ -46052,33 +46053,49 @@ var require_control_plane = __commonJS({
       }
       requestApproval(request) {
         console.log("Requesting approval for", request.requestId);
-        const cacheKey = `${request.sessionId}:${request.model}:${request.estimatedCost.toFixed(4)}`;
+        const cacheKey = `${request.sessionId}:${request.model}`;
         const cached = this.approvalCache.get(cacheKey);
         if (cached && cached.expires > Date.now()) {
           console.log(`Using cached approval for ${cacheKey}`);
           return Promise.resolve({ action: cached.action, chosenModel: cached.chosenModel });
         }
+        const inflight = this.inflightApprovals.get(cacheKey);
+        if (inflight) {
+          console.log(`Waiting for in-flight approval for ${cacheKey} (requestId: ${request.requestId})`);
+          return inflight;
+        }
         if (this.clients.size === 0) {
           console.log("No control plane client connected. Falling back to native OS dialog...");
-          return new Promise(async (resolve) => {
+          const promise2 = new Promise(async (resolve) => {
             const action = await terminal_ui_1.TerminalUI.askApproval(request.estimatedCost.toFixed(4), request.model);
             let chosenModel = void 0;
             if (action === "switch_model" && request.routingAlternatives && request.routingAlternatives.length > 0) {
               chosenModel = request.routingAlternatives[0].model;
             }
             if (action !== "cancel") {
-              this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 12e4 });
+              this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 6e4 });
             }
+            this.inflightApprovals.delete(cacheKey);
             resolve({ action, chosenModel });
           });
+          this.inflightApprovals.set(cacheKey, promise2);
+          return promise2;
         }
-        return new Promise((resolve) => {
-          this.pendingApprovals.set(request.requestId, { request, resolve });
+        const promise = new Promise((resolve) => {
+          this.pendingApprovals.set(request.requestId, {
+            request,
+            resolve: (result) => {
+              this.inflightApprovals.delete(cacheKey);
+              resolve(result);
+            }
+          });
           this.broadcast({
             type: "approval_pending",
             payload: request
           });
         });
+        this.inflightApprovals.set(cacheKey, promise);
+        return promise;
       }
       cancelApproval(requestId) {
         const pending = this.pendingApprovals.get(requestId);
@@ -46507,7 +46524,9 @@ ${steeringMsg}`;
             });
             if (!response.ok) {
               const errorText = await response.text();
-              throw new Error(`Upstream error: ${response.status} - ${errorText}`);
+              const err = new Error(`Upstream error: ${response.status} - ${errorText}`);
+              err.statusCode = response.status;
+              throw err;
             }
             const reader = response.body?.getReader();
             if (!reader) {
@@ -47012,11 +47031,19 @@ ${steeringMsg}`;
         const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation);
         return reply.send(stream);
       } catch (error) {
+        const isUpstreamError = error?.message && error.message.includes("Upstream error:");
+        if (!isUpstreamError && (request.raw.aborted || request.raw.socket.destroyed)) {
+          console.log("Client aborted request stream mid-flight.");
+          telemetryLogger.emitEvent({ eventType: "request_stream_cancelled", sessionId, requestId });
+          telemetryLogger.reconcileRequest(requestId, 0, "blocked", "cancelled");
+          return;
+        }
         console.error("Error forwarding request:", error);
-        telemetryLogger.emitEvent({ eventType: "request_stream_failed", sessionId, requestId, metadata: { error: error.message } });
+        telemetryLogger.emitEvent({ eventType: "request_stream_failed", sessionId, requestId, metadata: { error: error?.message } });
         telemetryLogger.reconcileRequest(requestId, 0, "failed", "failed");
         telemetryLogger.emitEvent({ eventType: "request_reconciled", sessionId, requestId, metadata: { state: "failed" } });
-        return reply.status(500).send({ error: { message: error.message } });
+        const status = error?.statusCode || 500;
+        return reply.status(status).send({ error: { message: error?.message || "Unknown error" } });
       }
     }
     function sendBlockedResponse(reply, provider, statusCode, message, errorType, errorCode) {

@@ -6,6 +6,7 @@ class ControlPlane {
     clients = new Set();
     pendingApprovals = new Map();
     approvalCache = new Map();
+    inflightApprovals = new Map();
     registerWebsocket(fastify) {
         fastify.get('/ws/control', { websocket: true }, (connection, req) => {
             console.log('WS Connection established on server');
@@ -28,10 +29,10 @@ class ControlPlane {
                             const req = pending.request;
                             pending.resolve({ action, chosenModel });
                             this.pendingApprovals.delete(requestId);
-                            // Cache the approval for 2 minutes to handle client retries
+                            // Cache the approval for 60 seconds to handle client retries
                             if (action !== 'cancel') {
-                                const cacheKey = `${req.sessionId}:${req.model}:${req.estimatedCost.toFixed(4)}`;
-                                this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 120000 });
+                                const cacheKey = `${req.sessionId}:${req.model}`;
+                                this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 60000 });
                             }
                             // Broadcast resolution to other clients
                             this.broadcast({ type: 'approval_cleared', payload: { requestId } });
@@ -49,34 +50,54 @@ class ControlPlane {
     }
     requestApproval(request) {
         console.log('Requesting approval for', request.requestId);
-        const cacheKey = `${request.sessionId}:${request.model}:${request.estimatedCost.toFixed(4)}`;
+        // Cache strictly by session and model. This allows parallel fanned-out requests 
+        // and retries from autonomous agents to coalesce into a single approval dialog.
+        // The budget evaluator runs before this, so total budget is still strictly enforced.
+        const cacheKey = `${request.sessionId}:${request.model}`;
         const cached = this.approvalCache.get(cacheKey);
         if (cached && cached.expires > Date.now()) {
             console.log(`Using cached approval for ${cacheKey}`);
             return Promise.resolve({ action: cached.action, chosenModel: cached.chosenModel });
         }
+        // Promise Coalescing: If there is already an in-flight approval for this exact cache key, wait for it!
+        const inflight = this.inflightApprovals.get(cacheKey);
+        if (inflight) {
+            console.log(`Waiting for in-flight approval for ${cacheKey} (requestId: ${request.requestId})`);
+            return inflight;
+        }
         // Fallback to native OS dialog if no WebSocket clients are connected
         if (this.clients.size === 0) {
             console.log('No control plane client connected. Falling back to native OS dialog...');
-            return new Promise(async (resolve) => {
+            const promise = new Promise(async (resolve) => {
                 const action = await terminal_ui_1.TerminalUI.askApproval(request.estimatedCost.toFixed(4), request.model);
                 let chosenModel = undefined;
                 if (action === 'switch_model' && request.routingAlternatives && request.routingAlternatives.length > 0) {
                     chosenModel = request.routingAlternatives[0].model;
                 }
                 if (action !== 'cancel') {
-                    this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 120000 });
+                    this.approvalCache.set(cacheKey, { action, chosenModel, expires: Date.now() + 60000 });
                 }
+                this.inflightApprovals.delete(cacheKey);
                 resolve({ action, chosenModel });
             });
+            this.inflightApprovals.set(cacheKey, promise);
+            return promise;
         }
-        return new Promise((resolve) => {
-            this.pendingApprovals.set(request.requestId, { request, resolve });
+        const promise = new Promise((resolve) => {
+            this.pendingApprovals.set(request.requestId, {
+                request,
+                resolve: (result) => {
+                    this.inflightApprovals.delete(cacheKey);
+                    resolve(result);
+                }
+            });
             this.broadcast({
                 type: 'approval_pending',
                 payload: request
             });
         });
+        this.inflightApprovals.set(cacheKey, promise);
+        return promise;
     }
     cancelApproval(requestId) {
         const pending = this.pendingApprovals.get(requestId);
