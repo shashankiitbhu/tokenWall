@@ -35429,9 +35429,7 @@ var require_dist8 = __commonJS({
         const configSettings = this.config.getConfig();
         const warnings = [];
         let dbBudgets = this.db.getBudgets(projectId);
-        if (dbBudgets.length === 0) {
-          this.initDefaultBudgets(projectId);
-        }
+        this.initDefaultBudgets(projectId);
         const reservation = this.db.reserveBudget(projectId, sessionId, requestId, estimatedCost, provider, model);
         return {
           allowed: reservation.allowed,
