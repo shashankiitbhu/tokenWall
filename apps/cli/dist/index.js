@@ -35876,6 +35876,11 @@ var require_dist11 = __commonJS({
     exports2.PromptOptimizer = void 0;
     var estimators_1 = require_dist7();
     var CONVERSATIONAL_FILLERS = [
+      // Semantic compression (stripping irrelevant boilerplate)
+      { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: "" },
+      { pattern: /Available agent types for the Agent tool:[\s\S]*?\(Tools:.*?\)/gi, replacement: "" },
+      { pattern: /The following skills are available for use with the Skill tool:[\s\S]*?security-review: Complete a security review of the pending changes on the current branch/gi, replacement: "" },
+      // Conversational fillers
       { pattern: /could you please go ahead and/gi, replacement: "" },
       { pattern: /please take a look at/gi, replacement: "check" },
       { pattern: /can you write a highly detailed, clean, and production-grade/gi, replacement: "write" },
@@ -35888,10 +35893,76 @@ var require_dist11 = __commonJS({
       { pattern: /thank you so much/gi, replacement: "" },
       { pattern: /kindly help me with/gi, replacement: "resolve" }
     ];
+    function minifyJsonBlocks(text) {
+      let result = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+        try {
+          return `\`\`\`json
+${JSON.stringify(JSON.parse(jsonString))}
+\`\`\``;
+        } catch {
+          return match;
+        }
+      });
+      let out = "";
+      let i = 0;
+      while (i < result.length) {
+        let c = result[i];
+        if ((c === "{" || c === "[") && (i === 0 || /\s/.test(result[i - 1]))) {
+          let braceCount = 0;
+          let inString = false;
+          let escape2 = false;
+          let j = i;
+          for (; j < result.length; j++) {
+            let char = result[j];
+            if (inString) {
+              if (escape2)
+                escape2 = false;
+              else if (char === "\\")
+                escape2 = true;
+              else if (char === '"')
+                inString = false;
+            } else {
+              if (char === '"')
+                inString = true;
+              else if (char === "{" || char === "[")
+                braceCount++;
+              else if (char === "}" || char === "]") {
+                braceCount--;
+                if (braceCount === 0) {
+                  let block = result.substring(i, j + 1);
+                  try {
+                    let parsed = JSON.parse(block);
+                    if (block.length > 50) {
+                      let minified = JSON.stringify(parsed);
+                      out += minified;
+                      i = j + 1;
+                      break;
+                    }
+                  } catch (e) {
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          if (braceCount === 0 && i !== j + 1) {
+            out += result[i];
+            i++;
+          } else if (braceCount !== 0) {
+            out += result[i];
+            i++;
+          }
+        } else {
+          out += result[i];
+          i++;
+        }
+      }
+      return out;
+    }
     var PromptOptimizer = class {
       optimize(prompt, model) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
-        let optimized = prompt;
+        let optimized = minifyJsonBlocks(prompt);
         for (const item of CONVERSATIONAL_FILLERS) {
           optimized = optimized.replace(item.pattern, item.replacement);
         }
@@ -46309,9 +46380,25 @@ var require_dist16 = __commonJS({
         if (typeof origMsg.content === "string") {
           origMsg.content = newText;
         } else if (Array.isArray(origMsg.content)) {
-          const textBlock = origMsg.content.find((b) => b.type === "text");
-          if (textBlock) {
-            textBlock.text = newText;
+          let firstTextBlock = null;
+          let cacheControl = null;
+          origMsg.content = origMsg.content.filter((b) => {
+            if (b.type === "text") {
+              if (!firstTextBlock)
+                firstTextBlock = b;
+              if (b.cache_control)
+                cacheControl = b.cache_control;
+              return b === firstTextBlock;
+            }
+            return true;
+          });
+          if (firstTextBlock) {
+            firstTextBlock.text = newText;
+            if (cacheControl && !firstTextBlock.cache_control) {
+              firstTextBlock.cache_control = cacheControl;
+            }
+          } else if (newText) {
+            origMsg.content.push({ type: "text", text: newText });
           }
         }
       }
@@ -46342,9 +46429,19 @@ var require_dist16 = __commonJS({
           newText = opt.optimizedText;
         }
         if (Array.isArray(origContent.parts)) {
-          const textPart = origContent.parts.find((p) => typeof p.text === "string");
-          if (textPart) {
-            textPart.text = newText;
+          let firstTextPart = null;
+          origContent.parts = origContent.parts.filter((p) => {
+            if (typeof p.text === "string") {
+              if (!firstTextPart)
+                firstTextPart = p;
+              return p === firstTextPart;
+            }
+            return true;
+          });
+          if (firstTextPart) {
+            firstTextPart.text = newText;
+          } else if (newText) {
+            origContent.parts.push({ text: newText });
           }
         }
       }

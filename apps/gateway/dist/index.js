@@ -139,9 +139,26 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             origMsg.content = newText;
         }
         else if (Array.isArray(origMsg.content)) {
-            const textBlock = origMsg.content.find((b) => b.type === 'text');
-            if (textBlock) {
-                textBlock.text = newText;
+            let firstTextBlock = null;
+            let cacheControl = null;
+            origMsg.content = origMsg.content.filter((b) => {
+                if (b.type === 'text') {
+                    if (!firstTextBlock)
+                        firstTextBlock = b;
+                    if (b.cache_control)
+                        cacheControl = b.cache_control;
+                    return b === firstTextBlock; // Keep only the very first text block
+                }
+                return true; // Keep image/tool blocks
+            });
+            if (firstTextBlock) {
+                firstTextBlock.text = newText;
+                if (cacheControl && !firstTextBlock.cache_control) {
+                    firstTextBlock.cache_control = cacheControl;
+                }
+            }
+            else if (newText) {
+                origMsg.content.push({ type: 'text', text: newText });
             }
         }
     }
@@ -173,9 +190,20 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
             newText = opt.optimizedText;
         }
         if (Array.isArray(origContent.parts)) {
-            const textPart = origContent.parts.find((p) => typeof p.text === 'string');
-            if (textPart) {
-                textPart.text = newText;
+            let firstTextPart = null;
+            origContent.parts = origContent.parts.filter((p) => {
+                if (typeof p.text === 'string') {
+                    if (!firstTextPart)
+                        firstTextPart = p;
+                    return p === firstTextPart;
+                }
+                return true;
+            });
+            if (firstTextPart) {
+                firstTextPart.text = newText;
+            }
+            else if (newText) {
+                origContent.parts.push({ text: newText });
             }
         }
     }

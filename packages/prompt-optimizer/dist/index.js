@@ -3,6 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PromptOptimizer = void 0;
 const estimators_1 = require("@tokenwall/estimators");
 const CONVERSATIONAL_FILLERS = [
+    // Semantic compression (stripping irrelevant boilerplate)
+    { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },
+    { pattern: /Available agent types for the Agent tool:[\s\S]*?\(Tools:.*?\)/gi, replacement: '' },
+    { pattern: /The following skills are available for use with the Skill tool:[\s\S]*?security-review: Complete a security review of the pending changes on the current branch/gi, replacement: '' },
+    // Conversational fillers
     { pattern: /could you please go ahead and/gi, replacement: '' },
     { pattern: /please take a look at/gi, replacement: 'check' },
     { pattern: /can you write a highly detailed, clean, and production-grade/gi, replacement: 'write' },
@@ -15,10 +20,79 @@ const CONVERSATIONAL_FILLERS = [
     { pattern: /thank you so much/gi, replacement: '' },
     { pattern: /kindly help me with/gi, replacement: 'resolve' }
 ];
+function minifyJsonBlocks(text) {
+    let result = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+        try {
+            return `\`\`\`json\n${JSON.stringify(JSON.parse(jsonString))}\n\`\`\``;
+        }
+        catch {
+            return match;
+        }
+    });
+    let out = '';
+    let i = 0;
+    while (i < result.length) {
+        let c = result[i];
+        if ((c === '{' || c === '[') && (i === 0 || /\s/.test(result[i - 1]))) {
+            let braceCount = 0;
+            let inString = false;
+            let escape = false;
+            let j = i;
+            for (; j < result.length; j++) {
+                let char = result[j];
+                if (inString) {
+                    if (escape)
+                        escape = false;
+                    else if (char === '\\')
+                        escape = true;
+                    else if (char === '"')
+                        inString = false;
+                }
+                else {
+                    if (char === '"')
+                        inString = true;
+                    else if (char === '{' || char === '[')
+                        braceCount++;
+                    else if (char === '}' || char === ']') {
+                        braceCount--;
+                        if (braceCount === 0) {
+                            let block = result.substring(i, j + 1);
+                            try {
+                                let parsed = JSON.parse(block);
+                                if (block.length > 50) {
+                                    let minified = JSON.stringify(parsed);
+                                    out += minified;
+                                    i = j + 1;
+                                    break;
+                                }
+                            }
+                            catch (e) { }
+                            break;
+                        }
+                    }
+                }
+            }
+            if (braceCount === 0 && i !== j + 1) {
+                out += result[i];
+                i++;
+            }
+            else if (braceCount !== 0) {
+                out += result[i];
+                i++;
+            }
+        }
+        else {
+            out += result[i];
+            i++;
+        }
+    }
+    return out;
+}
 class PromptOptimizer {
     optimize(prompt, model) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
-        let optimized = prompt;
+        // First apply JSON minification
+        let optimized = minifyJsonBlocks(prompt);
         // Apply filler regexes
         for (const item of CONVERSATIONAL_FILLERS) {
             optimized = optimized.replace(item.pattern, item.replacement);
