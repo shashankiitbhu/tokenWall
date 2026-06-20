@@ -151,9 +151,25 @@ function getOptimizedMessages(
     if (typeof origMsg.content === 'string') {
       origMsg.content = newText;
     } else if (Array.isArray(origMsg.content)) {
-      const textBlock = origMsg.content.find((b: any) => b.type === 'text');
-      if (textBlock) {
-        textBlock.text = newText;
+      let firstTextBlock: any = null;
+      let cacheControl: any = null;
+      
+      origMsg.content = origMsg.content.filter((b: any) => {
+        if (b.type === 'text') {
+          if (!firstTextBlock) firstTextBlock = b;
+          if (b.cache_control) cacheControl = b.cache_control;
+          return b === firstTextBlock; // Keep only the very first text block
+        }
+        return true; // Keep image/tool blocks
+      });
+      
+      if (firstTextBlock) {
+        firstTextBlock.text = newText;
+        if (cacheControl && !firstTextBlock.cache_control) {
+          firstTextBlock.cache_control = cacheControl;
+        }
+      } else if (newText) {
+        origMsg.content.push({ type: 'text', text: newText });
       }
     }
   }
@@ -190,9 +206,18 @@ function getOptimizedGeminiContents(
     }
 
     if (Array.isArray(origContent.parts)) {
-      const textPart = origContent.parts.find((p: any) => typeof p.text === 'string');
-      if (textPart) {
-        textPart.text = newText;
+      let firstTextPart: any = null;
+      origContent.parts = origContent.parts.filter((p: any) => {
+        if (typeof p.text === 'string') {
+          if (!firstTextPart) firstTextPart = p;
+          return p === firstTextPart;
+        }
+        return true;
+      });
+      if (firstTextPart) {
+        firstTextPart.text = newText;
+      } else if (newText) {
+        origContent.parts.push({ text: newText });
       }
     }
   }
