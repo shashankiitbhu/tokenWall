@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const fastify_1 = __importDefault(require("fastify"));
 const fs_1 = __importDefault(require("fs"));
+const os_1 = __importDefault(require("os"));
 const core_1 = require("@tokenwall/core");
 const providers_1 = require("@tokenwall/providers");
 const estimators_1 = require("@tokenwall/estimators");
@@ -144,6 +145,17 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             }
         }
     }
+    try {
+        const logDir = path_1.default.join(os_1.default.homedir(), '.tokenwall', 'logs');
+        if (!fs_1.default.existsSync(logDir))
+            fs_1.default.mkdirSync(logDir, { recursive: true });
+        const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
+        fs_1.default.writeFileSync(logPath, JSON.stringify(newMessages, null, 2), 'utf8');
+        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+    }
+    catch (err) {
+        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
+    }
     return newMessages;
 }
 function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
@@ -166,6 +178,17 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
                 textPart.text = newText;
             }
         }
+    }
+    try {
+        const logDir = path_1.default.join(os_1.default.homedir(), '.tokenwall', 'logs');
+        if (!fs_1.default.existsSync(logDir))
+            fs_1.default.mkdirSync(logDir, { recursive: true });
+        const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
+        fs_1.default.writeFileSync(logPath, JSON.stringify(newContents, null, 2), 'utf8');
+        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+    }
+    catch (err) {
+        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
     }
     return newContents;
 }

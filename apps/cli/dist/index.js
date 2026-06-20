@@ -46180,6 +46180,7 @@ var require_dist16 = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     var fastify_1 = __importDefault(require_fastify());
     var fs_1 = __importDefault(require("fs"));
+    var os_1 = __importDefault(require("os"));
     var core_1 = require_dist();
     var providers_1 = require_dist5();
     var estimators_1 = require_dist7();
@@ -46314,6 +46315,16 @@ var require_dist16 = __commonJS({
           }
         }
       }
+      try {
+        const logDir = path_1.default.join(os_1.default.homedir(), ".tokenwall", "logs");
+        if (!fs_1.default.existsSync(logDir))
+          fs_1.default.mkdirSync(logDir, { recursive: true });
+        const logPath = path_1.default.join(logDir, "latest_optimized_request.json");
+        fs_1.default.writeFileSync(logPath, JSON.stringify(newMessages, null, 2), "utf8");
+        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+      } catch (err) {
+        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
+      }
       return newMessages;
     }
     function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
@@ -46336,6 +46347,16 @@ var require_dist16 = __commonJS({
             textPart.text = newText;
           }
         }
+      }
+      try {
+        const logDir = path_1.default.join(os_1.default.homedir(), ".tokenwall", "logs");
+        if (!fs_1.default.existsSync(logDir))
+          fs_1.default.mkdirSync(logDir, { recursive: true });
+        const logPath = path_1.default.join(logDir, "latest_optimized_request.json");
+        fs_1.default.writeFileSync(logPath, JSON.stringify(newContents, null, 2), "utf8");
+        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+      } catch (err) {
+        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
       }
       return newContents;
     }

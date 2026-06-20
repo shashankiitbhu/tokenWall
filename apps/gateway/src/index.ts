@@ -1,5 +1,6 @@
 import fastify from 'fastify';
 import fs from 'fs';
+import os from 'os';
 import { DBManager, ConfigManager, TokenWallConfig } from '@tokenwall/core';
 import { ProviderRegistry, NormalizedRequest, NormalizedResponse } from '@tokenwall/providers';
 import { calculatePreFlightEstimation, getPricingForModel } from '@tokenwall/estimators';
@@ -156,6 +157,17 @@ function getOptimizedMessages(
       }
     }
   }
+  
+  try {
+    const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, 'latest_optimized_request.json');
+    fs.writeFileSync(logPath, JSON.stringify(newMessages, null, 2), 'utf8');
+    console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+  } catch (err) {
+    console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
+  }
+
   return newMessages;
 }
 
@@ -184,6 +196,17 @@ function getOptimizedGeminiContents(
       }
     }
   }
+
+  try {
+    const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const logPath = path.join(logDir, 'latest_optimized_request.json');
+    fs.writeFileSync(logPath, JSON.stringify(newContents, null, 2), 'utf8');
+    console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+  } catch (err) {
+    console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
+  }
+
   return newContents;
 }
 
