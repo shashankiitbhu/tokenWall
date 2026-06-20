@@ -120,7 +120,7 @@ server.post('/v1beta/models/*', async (request, reply) => {
     const targetUrl = `${baseUrl}${modelUrl}`;
     return handleInterception('gemini', targetUrl, request, reply);
 });
-function getOptimizedMessages(originalMessages, cleanMessages, lastUserIdx, optimization) {
+function getOptimizedMessages(originalMessages, cleanMessages, model) {
     if (!originalMessages)
         return originalMessages;
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -130,8 +130,9 @@ function getOptimizedMessages(originalMessages, cleanMessages, lastUserIdx, opti
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
-        if (i === lastUserIdx && optimization) {
-            newText = optimization.optimizedText;
+        if (cleanMsg.role === 'user') {
+            const opt = promptOptimizer.optimize(newText, model);
+            newText = opt.optimizedText;
         }
         if (typeof origMsg.content === 'string') {
             origMsg.content = newText;
@@ -145,7 +146,7 @@ function getOptimizedMessages(originalMessages, cleanMessages, lastUserIdx, opti
     }
     return newMessages;
 }
-function getOptimizedGeminiContents(originalContents, cleanMessages, lastUserIdx, optimization) {
+function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
     if (!originalContents)
         return originalContents;
     const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -155,8 +156,9 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, lastUserIdx
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
-        if (i === lastUserIdx && optimization) {
-            newText = optimization.optimizedText;
+        if (cleanMsg.role === 'user') {
+            const opt = promptOptimizer.optimize(newText, model);
+            newText = opt.optimizedText;
         }
         if (Array.isArray(origContent.parts)) {
             const textPart = origContent.parts.find((p) => typeof p.text === 'string');
@@ -701,12 +703,15 @@ async function handleInterception(provider, targetUrl, request, reply) {
     const contextReport = contextAnalyzer.analyze(parsedRequest, config);
     const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
     // Prompt Optimization (heuristic compression preview)
-    const firstUserMsg = parsedRequest.messages.find(m => m.role === 'user');
-    const optimization = firstUserMsg
-        ? promptOptimizer.optimize(firstUserMsg.content, parsedRequest.model)
+    const userMessages = parsedRequest.messages.filter(m => m.role === 'user');
+    const lastUserMsg = userMessages[userMessages.length - 1];
+    // We apply prompt optimizer to ALL user messages in getOptimizedMessages later.
+    // For telemetry/preview purposes, we just run it on the last user message to see if there's any immediate savings.
+    const optimization = lastUserMsg
+        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model)
         : undefined;
     // Run loop detector
-    const loopCheck = loopDetector.detect(sessionId, firstUserMsg ? firstUserMsg.content : '', estimation.estimatedInputTokens);
+    const loopCheck = loopDetector.detect(sessionId, lastUserMsg ? lastUserMsg.content : '', estimation.estimatedInputTokens);
     if (loopCheck.loopDetected) {
         telemetryLogger.emitEvent({
             eventType: 'runaway_loop_detected',
@@ -854,24 +859,23 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (action === 'optimize') {
         const cleanMsgs = contextReport.cleanMessages;
         const lastUserIdx = cleanMsgs.map(m => m.role).lastIndexOf('user');
-        if (lastUserIdx !== -1 && optimization) {
-            savedTokens += optimization.tokensSaved;
-        }
-        savedTokens += contextReport.totalWasteTokens;
         // Re-serialize back to provider schema while preserving non-text blocks
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: getOptimizedMessages(request.body.messages, cleanMsgs, lastUserIdx, optimization)
+                messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model)
             };
         }
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, lastUserIdx, optimization)
+                contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model)
             };
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
+        // Calculate exact tokens saved by re-evaluating the token count
+        const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
+        savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
         // Save CCR cached contents if any
         if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {

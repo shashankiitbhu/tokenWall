@@ -34769,9 +34769,9 @@ var require_dist5 = __commonJS({
   }
 });
 
-// ../../node_modules/base64-js/index.js
+// ../../node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js
 var require_base64_js = __commonJS({
-  "../../node_modules/base64-js/index.js"(exports2) {
+  "../../node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js"(exports2) {
     "use strict";
     exports2.byteLength = byteLength;
     exports2.toByteArray = toByteArray;
@@ -34870,9 +34870,9 @@ var require_base64_js = __commonJS({
   }
 });
 
-// ../../node_modules/js-tiktoken/dist/index.cjs
+// ../../node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.cjs
 var require_dist6 = __commonJS({
-  "../../node_modules/js-tiktoken/dist/index.cjs"(exports2) {
+  "../../node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.cjs"(exports2) {
     "use strict";
     var base64 = require_base64_js();
     function _interopDefault(e) {
@@ -35201,30 +35201,42 @@ var require_dist7 = __commonJS({
     exports2.calculatePreFlightEstimation = calculatePreFlightEstimation;
     var js_tiktoken_1 = require_dist6();
     exports2.PRICING_DIRECTORY = {
-      // Anthropic
+      // Anthropic 2026 Models
+      "claude-fable-5": { inputPerMillion: 10, outputPerMillion: 50, contextWindow: 1e6 },
+      "claude-opus-4-8": { inputPerMillion: 5, outputPerMillion: 25, contextWindow: 1e6 },
+      "claude-sonnet-4-6": { inputPerMillion: 3, outputPerMillion: 15, contextWindow: 1e6 },
+      "claude-haiku-4-5": { inputPerMillion: 1, outputPerMillion: 5, contextWindow: 2e5 },
+      // Anthropic Legacy/Prior Generation
       "claude-3-5-sonnet": { inputPerMillion: 3, outputPerMillion: 15, contextWindow: 2e5 },
-      "claude-3-5-sonnet-20241022": { inputPerMillion: 3, outputPerMillion: 15, contextWindow: 2e5 },
       "claude-3-5-haiku": { inputPerMillion: 0.8, outputPerMillion: 4, contextWindow: 2e5 },
-      "claude-3-5-haiku-20241022": { inputPerMillion: 0.8, outputPerMillion: 4, contextWindow: 2e5 },
       "claude-3-opus": { inputPerMillion: 15, outputPerMillion: 75, contextWindow: 2e5 },
-      "claude-3-opus-20240229": { inputPerMillion: 15, outputPerMillion: 75, contextWindow: 2e5 },
       "claude-3-haiku": { inputPerMillion: 0.25, outputPerMillion: 1.25, contextWindow: 2e5 },
-      // OpenAI
-      "gpt-4o": { inputPerMillion: 5, outputPerMillion: 15, contextWindow: 128e3 },
-      "gpt-4o-2024-08-06": { inputPerMillion: 2.5, outputPerMillion: 10, contextWindow: 128e3 },
+      // OpenAI 2026 Models
+      "gpt-5": { inputPerMillion: 1.25, outputPerMillion: 10, contextWindow: 128e3 },
+      "gpt-5-mini": { inputPerMillion: 0.25, outputPerMillion: 2, contextWindow: 128e3 },
+      "gpt-5-nano": { inputPerMillion: 0.05, outputPerMillion: 0.4, contextWindow: 128e3 },
+      "o4-mini": { inputPerMillion: 1.1, outputPerMillion: 4.4, contextWindow: 128e3 },
+      "o3-pro": { inputPerMillion: 20, outputPerMillion: 80, contextWindow: 2e5 },
+      "o3": { inputPerMillion: 2, outputPerMillion: 8, contextWindow: 2e5 },
+      // OpenAI Legacy/Prior Generation
+      "gpt-4o": { inputPerMillion: 2.5, outputPerMillion: 10, contextWindow: 128e3 },
       "gpt-4o-mini": { inputPerMillion: 0.15, outputPerMillion: 0.6, contextWindow: 128e3 },
       "gpt-4-turbo": { inputPerMillion: 10, outputPerMillion: 30, contextWindow: 128e3 },
       "gpt-3.5-turbo": { inputPerMillion: 0.5, outputPerMillion: 1.5, contextWindow: 16385 },
-      // Gemini
+      // Gemini 2026 Models
+      "gemini-3.5-flash": { inputPerMillion: 1.5, outputPerMillion: 9, contextWindow: 1e6 },
+      "gemini-3.1-pro": { inputPerMillion: 1.25, outputPerMillion: 5, contextWindow: 2e6 },
+      "gemini-2.5-flash-lite": { inputPerMillion: 0.1, outputPerMillion: 0.4, contextWindow: 1e6 },
+      "gemini-2.5-flash": { inputPerMillion: 0.3, outputPerMillion: 2.5, contextWindow: 1e6 },
+      // Gemini Legacy/Prior Generation
       "gemini-1.5-pro": { inputPerMillion: 1.25, outputPerMillion: 5, contextWindow: 1e6 },
-      "gemini-1.5-flash": { inputPerMillion: 0.075, outputPerMillion: 0.3, contextWindow: 1e6 },
-      "gemini-2.0-flash": { inputPerMillion: 0.075, outputPerMillion: 0.3, contextWindow: 1e6 }
+      "gemini-1.5-flash": { inputPerMillion: 0.075, outputPerMillion: 0.3, contextWindow: 1e6 }
     };
     var gpt4oTokenizer = (0, js_tiktoken_1.getEncoding)("o200k_base");
     var defaultTokenizer = (0, js_tiktoken_1.getEncoding)("cl100k_base");
     function countTokens(text, model) {
       try {
-        if (model.includes("gpt-4o")) {
+        if (model.includes("gpt-4o") || model.includes("gpt-5")) {
           return gpt4oTokenizer.encode(text).length;
         }
         return defaultTokenizer.encode(text).length;
@@ -35241,8 +35253,25 @@ var require_dist7 = __commonJS({
       return total;
     }
     function getPricingForModel(modelName) {
-      const normalized = Object.keys(exports2.PRICING_DIRECTORY).find((key) => modelName.toLowerCase().includes(key));
-      return exports2.PRICING_DIRECTORY[normalized || "gemini-1.5-flash"];
+      const nameLower = modelName.toLowerCase();
+      const normalized = Object.keys(exports2.PRICING_DIRECTORY).find((key) => {
+        if (nameLower.includes(key))
+          return true;
+        if (key.includes("opus") && nameLower.includes("opus"))
+          return true;
+        if (key.includes("sonnet") && nameLower.includes("sonnet"))
+          return true;
+        if (key.includes("haiku") && nameLower.includes("haiku"))
+          return true;
+        if (key.includes("fable") && nameLower.includes("fable"))
+          return true;
+        if (key.includes("gpt-5") && nameLower.includes("gpt-5"))
+          return true;
+        if (key.includes("gpt-4o") && nameLower.includes("gpt-4o"))
+          return true;
+        return false;
+      });
+      return exports2.PRICING_DIRECTORY[normalized || "gemini-3.5-flash"];
     }
     function calculatePreFlightEstimation(req, history = []) {
       const pricing = getPricingForModel(req.model);
@@ -35448,6 +35477,7 @@ var require_dist9 = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ContextAnalyzer = exports2.CacheAligner = exports2.CodeCompressor = exports2.JsonCrusher = void 0;
+    var estimators_1 = require_dist7();
     var JsonCrusher = class {
       static crush(jsonStr) {
         try {
@@ -35528,35 +35558,39 @@ var require_dist9 = __commonJS({
                   type: "volatile_prefix",
                   description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. This prevents provider-side prefix caching and increases latency/costs.`,
                   target: finding.value,
-                  approximateTokens: Math.ceil(finding.value.length / 4),
+                  approximateTokens: (0, estimators_1.countTokens)(finding.value, req.model),
                   potentialSavingsPercent: 50
                 });
               }
             }
           }
           const lockfileMatch = content.match(/(?:File|path|Filename|attachment):\s*([a-zA-Z0-9_\-\.\/]*lock\.[a-z]+|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)/gi);
-          if (lockfileMatch) {
-            for (const match of lockfileMatch) {
-              const approxTokens = Math.ceil(content.length / 4);
+          const lockfileRegex = /(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g;
+          if (lockfileMatch && lockfileRegex.test(content)) {
+            lockfileRegex.lastIndex = 0;
+            const beforeTokens = (0, estimators_1.countTokens)(content, req.model);
+            if (isReversible) {
+              const id = `ccr_lk_${Math.random().toString(36).substring(2, 7)}`;
+              cachedContents.push({ id, content });
+              content = content.replace(lockfileRegex, `[TokenWall Reversible Content: ${id} - Truncated Lockfile content. Use tokenwall_retrieve_content tool with content_id='${id}' if you need to read the original content.]`);
+            } else {
+              content = content.replace(lockfileRegex, "[TokenWall: Truncated Lockfile content. Use package.json for dependencies list]");
+            }
+            const afterTokens = (0, estimators_1.countTokens)(content, req.model);
+            const saved = Math.max(0, beforeTokens - afterTokens);
+            if (saved > 0) {
               inefficiencies.push({
                 type: "lockfile",
-                description: `Lockfile detected: '${match}'. Standard lockfiles contribute heavily to token bloat.`,
-                target: match,
-                approximateTokens: approxTokens,
+                description: `Lockfile detected: '${lockfileMatch[0]}'. Standard lockfiles contribute heavily to token bloat.`,
+                target: lockfileMatch[0],
+                approximateTokens: saved,
                 potentialSavingsPercent: 95
               });
-              totalWasteTokens += Math.ceil(approxTokens * 0.95);
-              if (isReversible) {
-                const id = `ccr_lk_${Math.random().toString(36).substring(2, 7)}`;
-                cachedContents.push({ id, content });
-                content = content.replace(/(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g, `[TokenWall Reversible Content: ${id} - Truncated Lockfile content. Use tokenwall_retrieve_content tool with content_id='${id}' if you need to read the original content.]`);
-              } else {
-                content = content.replace(/(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g, "[TokenWall: Truncated Lockfile content. Use package.json for dependencies list]");
-              }
+              totalWasteTokens += saved;
             }
           }
           if (content.includes("node_modules/") || content.includes(".git/")) {
-            const approxTokens = Math.ceil(content.length / 4);
+            const approxTokens = (0, estimators_1.countTokens)(content, req.model);
             inefficiencies.push({
               type: "node_modules",
               description: `References to 'node_modules' or '.git' files detected.`,
@@ -35564,19 +35598,10 @@ var require_dist9 = __commonJS({
               approximateTokens: approxTokens,
               potentialSavingsPercent: 99
             });
-            totalWasteTokens += Math.ceil(approxTokens * 0.99);
           }
           const traceLines = content.match(/at\s+.*:\d+:\d+/g);
           if (traceLines && traceLines.length > 8) {
-            const approxTokens = Math.ceil(content.length / 4);
-            inefficiencies.push({
-              type: "logs",
-              description: `Oversized stack trace containing ${traceLines.length} repeat references detected.`,
-              target: "stack_trace_repeats",
-              approximateTokens: approxTokens,
-              potentialSavingsPercent: 60
-            });
-            totalWasteTokens += Math.ceil(approxTokens * 0.6);
+            const beforeTokens = (0, estimators_1.countTokens)(content, req.model);
             if (isReversible) {
               const id = `ccr_lg_${Math.random().toString(36).substring(2, 7)}`;
               cachedContents.push({ id, content });
@@ -35597,25 +35622,41 @@ var require_dist9 = __commonJS({
               }
               content = filteredLines.join("\n");
             }
+            const afterTokens = (0, estimators_1.countTokens)(content, req.model);
+            const saved = Math.max(0, beforeTokens - afterTokens);
+            if (saved > 0) {
+              inefficiencies.push({
+                type: "logs",
+                description: `Oversized stack trace containing ${traceLines.length} repeat references detected.`,
+                target: "stack_trace_repeats",
+                approximateTokens: saved,
+                potentialSavingsPercent: 60
+              });
+              totalWasteTokens += saved;
+            }
           }
           const base64Regex = /([A-Za-z0-9+/]{100,})/g;
-          const base64Matches = content.match(base64Regex);
-          if (base64Matches) {
-            const approxTokens = Math.ceil(content.length / 4);
-            inefficiencies.push({
-              type: "binary",
-              description: `Embedded raw binary/base64 block detected.`,
-              target: "base64_data",
-              approximateTokens: approxTokens,
-              potentialSavingsPercent: 100
-            });
-            totalWasteTokens += approxTokens;
+          if (base64Regex.test(content)) {
+            base64Regex.lastIndex = 0;
+            const beforeTokens = (0, estimators_1.countTokens)(content, req.model);
             if (isReversible) {
               const id = `ccr_bn_${Math.random().toString(36).substring(2, 7)}`;
               cachedContents.push({ id, content });
               content = content.replace(base64Regex, `[TokenWall Reversible Content: ${id} - Stripped base64 binary block. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the original binary data.]`);
             } else {
               content = content.replace(base64Regex, "[TokenWall: Stripped base64 binary block]");
+            }
+            const afterTokens = (0, estimators_1.countTokens)(content, req.model);
+            const saved = Math.max(0, beforeTokens - afterTokens);
+            if (saved > 0) {
+              inefficiencies.push({
+                type: "binary",
+                description: `Embedded raw binary/base64 block detected.`,
+                target: "base64_data",
+                approximateTokens: saved,
+                potentialSavingsPercent: 100
+              });
+              totalWasteTokens += saved;
             }
           }
           if (config?.jsonCrushing !== false) {
@@ -35625,21 +35666,22 @@ var require_dist9 = __commonJS({
               const rawJson = jsonMatch[1];
               if (rawJson.length > 250) {
                 const crushedJson = JsonCrusher.crush(rawJson);
-                const beforeTokens = Math.ceil(rawJson.length / 4);
-                const afterTokens = Math.ceil(crushedJson.length / 4);
+                const beforeTokens = (0, estimators_1.countTokens)(jsonMatch[0], req.model);
+                const newBlock = `\`\`\`json
+${crushedJson}
+\`\`\``;
+                const afterTokens = (0, estimators_1.countTokens)(newBlock, req.model);
                 const saved = Math.max(0, beforeTokens - afterTokens);
-                if (saved > 20) {
+                if (saved > 10) {
                   inefficiencies.push({
                     type: "json",
                     description: `Large JSON block minified.`,
                     target: "json_block",
-                    approximateTokens: beforeTokens,
+                    approximateTokens: saved,
                     potentialSavingsPercent: Math.round(saved / beforeTokens * 100)
                   });
                   totalWasteTokens += saved;
-                  content = content.replace(jsonMatch[0], `\`\`\`json
-${crushedJson}
-\`\`\``);
+                  content = content.replace(jsonMatch[0], newBlock);
                 }
               }
             }
@@ -35652,30 +35694,35 @@ ${crushedJson}
               const rawCode = codeMatch[2];
               if (rawCode.length > 300) {
                 const compressedCode = CodeCompressor.compress(rawCode);
-                const beforeTokens = Math.ceil(rawCode.length / 4);
-                const afterTokens = Math.ceil(compressedCode.length / 4);
+                let newBlock = "";
+                let id = "";
+                if (isReversible) {
+                  id = `ccr_cd_${Math.random().toString(36).substring(2, 7)}`;
+                  newBlock = `[TokenWall Reversible Content: ${id} - Code comments stripped to save tokens. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the comments/docstrings.]
+\`\`\`${lang}
+${compressedCode}
+\`\`\``;
+                } else {
+                  newBlock = `\`\`\`${lang}
+${compressedCode}
+\`\`\``;
+                }
+                const beforeTokens = (0, estimators_1.countTokens)(codeMatch[0], req.model);
+                const afterTokens = (0, estimators_1.countTokens)(newBlock, req.model);
                 const saved = Math.max(0, beforeTokens - afterTokens);
-                if (saved > 30) {
+                if (saved > 10) {
                   inefficiencies.push({
                     type: "code",
                     description: `Code comments and whitespace compressed in ${lang} block.`,
                     target: `${lang}_code_block`,
-                    approximateTokens: beforeTokens,
+                    approximateTokens: saved,
                     potentialSavingsPercent: Math.round(saved / beforeTokens * 100)
                   });
                   totalWasteTokens += saved;
                   if (isReversible) {
-                    const id = `ccr_cd_${Math.random().toString(36).substring(2, 7)}`;
                     cachedContents.push({ id, content: rawCode });
-                    content = content.replace(codeMatch[0], `[TokenWall Reversible Content: ${id} - Code comments stripped to save tokens. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the comments/docstrings.]
-\`\`\`${lang}
-${compressedCode}
-\`\`\``);
-                  } else {
-                    content = content.replace(codeMatch[0], `\`\`\`${lang}
-${compressedCode}
-\`\`\``);
                   }
+                  content = content.replace(codeMatch[0], newBlock);
                 }
               }
             }
@@ -46246,7 +46293,7 @@ var require_dist16 = __commonJS({
       const targetUrl = `${baseUrl}${modelUrl}`;
       return handleInterception("gemini", targetUrl, request, reply);
     });
-    function getOptimizedMessages(originalMessages, cleanMessages, lastUserIdx, optimization) {
+    function getOptimizedMessages(originalMessages, cleanMessages, model) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -46256,8 +46303,9 @@ var require_dist16 = __commonJS({
         if (!cleanMsg)
           continue;
         let newText = cleanMsg.content;
-        if (i === lastUserIdx && optimization) {
-          newText = optimization.optimizedText;
+        if (cleanMsg.role === "user") {
+          const opt = promptOptimizer.optimize(newText, model);
+          newText = opt.optimizedText;
         }
         if (typeof origMsg.content === "string") {
           origMsg.content = newText;
@@ -46270,7 +46318,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    function getOptimizedGeminiContents(originalContents, cleanMessages, lastUserIdx, optimization) {
+    function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -46280,8 +46328,9 @@ var require_dist16 = __commonJS({
         if (!cleanMsg)
           continue;
         let newText = cleanMsg.content;
-        if (i === lastUserIdx && optimization) {
-          newText = optimization.optimizedText;
+        if (cleanMsg.role === "user") {
+          const opt = promptOptimizer.optimize(newText, model);
+          newText = opt.optimizedText;
         }
         if (Array.isArray(origContent.parts)) {
           const textPart = origContent.parts.find((p) => typeof p.text === "string");
@@ -46788,9 +46837,10 @@ ${steeringMsg}`;
       const config = configManager2.getConfig();
       const contextReport = contextAnalyzer.analyze(parsedRequest, config);
       const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
-      const firstUserMsg = parsedRequest.messages.find((m) => m.role === "user");
-      const optimization = firstUserMsg ? promptOptimizer.optimize(firstUserMsg.content, parsedRequest.model) : void 0;
-      const loopCheck = loopDetector.detect(sessionId, firstUserMsg ? firstUserMsg.content : "", estimation.estimatedInputTokens);
+      const userMessages = parsedRequest.messages.filter((m) => m.role === "user");
+      const lastUserMsg = userMessages[userMessages.length - 1];
+      const optimization = lastUserMsg ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model) : void 0;
+      const loopCheck = loopDetector.detect(sessionId, lastUserMsg ? lastUserMsg.content : "", estimation.estimatedInputTokens);
       if (loopCheck.loopDetected) {
         telemetryLogger.emitEvent({
           eventType: "runaway_loop_detected",
@@ -46922,22 +46972,20 @@ ${steeringMsg}`;
       if (action === "optimize") {
         const cleanMsgs = contextReport.cleanMessages;
         const lastUserIdx = cleanMsgs.map((m) => m.role).lastIndexOf("user");
-        if (lastUserIdx !== -1 && optimization) {
-          savedTokens += optimization.tokensSaved;
-        }
-        savedTokens += contextReport.totalWasteTokens;
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: getOptimizedMessages(request.body.messages, cleanMsgs, lastUserIdx, optimization)
+            messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model)
           };
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, lastUserIdx, optimization)
+            contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model)
           };
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
+        const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
+        savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`\u2714 Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
         if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
           for (const cc of contextReport.cachedContents) {

@@ -1,5 +1,6 @@
 import { NormalizedRequest } from '@tokenwall/providers';
 import { TokenWallConfig } from '@tokenwall/core';
+import { countTokens } from '@tokenwall/estimators';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -117,7 +118,7 @@ export class ContextAnalyzer {
               type: 'volatile_prefix',
               description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. This prevents provider-side prefix caching and increases latency/costs.`,
               target: finding.value,
-              approximateTokens: Math.ceil(finding.value.length / 4),
+              approximateTokens: countTokens(finding.value, req.model),
               potentialSavingsPercent: 50
             });
           }
@@ -126,37 +127,43 @@ export class ContextAnalyzer {
 
       // 1. Lockfiles detection
       const lockfileMatch = content.match(/(?:File|path|Filename|attachment):\s*([a-zA-Z0-9_\-\.\/]*lock\.[a-z]+|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)/gi);
-      if (lockfileMatch) {
-        for (const match of lockfileMatch) {
-          const approxTokens = Math.ceil(content.length / 4); // Lockfile block token size
+      const lockfileRegex = /(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g;
+      if (lockfileMatch && lockfileRegex.test(content)) {
+        lockfileRegex.lastIndex = 0;
+        const beforeTokens = countTokens(content, req.model);
+        
+        if (isReversible) {
+          const id = `ccr_lk_${Math.random().toString(36).substring(2, 7)}`;
+          cachedContents.push({ id, content });
+          content = content.replace(
+            lockfileRegex,
+            `[TokenWall Reversible Content: ${id} - Truncated Lockfile content. Use tokenwall_retrieve_content tool with content_id='${id}' if you need to read the original content.]`
+          );
+        } else {
+          content = content.replace(
+            lockfileRegex,
+            '[TokenWall: Truncated Lockfile content. Use package.json for dependencies list]'
+          );
+        }
+        
+        const afterTokens = countTokens(content, req.model);
+        const saved = Math.max(0, beforeTokens - afterTokens);
+        
+        if (saved > 0) {
           inefficiencies.push({
             type: 'lockfile',
-            description: `Lockfile detected: '${match}'. Standard lockfiles contribute heavily to token bloat.`,
-            target: match,
-            approximateTokens: approxTokens,
+            description: `Lockfile detected: '${lockfileMatch[0]}'. Standard lockfiles contribute heavily to token bloat.`,
+            target: lockfileMatch[0],
+            approximateTokens: saved,
             potentialSavingsPercent: 95
           });
-          totalWasteTokens += Math.ceil(approxTokens * 0.95);
-          
-          if (isReversible) {
-            const id = `ccr_lk_${Math.random().toString(36).substring(2, 7)}`;
-            cachedContents.push({ id, content });
-            content = content.replace(
-              /(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g,
-              `[TokenWall Reversible Content: ${id} - Truncated Lockfile content. Use tokenwall_retrieve_content tool with content_id='${id}' if you need to read the original content.]`
-            );
-          } else {
-            content = content.replace(
-              /(\`\`\`[a-z]*\s*[\s\S]*?"dependencies"[\s\S]*?\`\`\`)/g,
-              '[TokenWall: Truncated Lockfile content. Use package.json for dependencies list]'
-            );
-          }
+          totalWasteTokens += saved;
         }
       }
 
       // 2. node_modules or .git paths
       if (content.includes('node_modules/') || content.includes('.git/')) {
-        const approxTokens = Math.ceil(content.length / 4);
+        const approxTokens = countTokens(content, req.model);
         inefficiencies.push({
           type: 'node_modules',
           description: `References to 'node_modules' or '.git' files detected.`,
@@ -164,21 +171,13 @@ export class ContextAnalyzer {
           approximateTokens: approxTokens,
           potentialSavingsPercent: 99
         });
-        totalWasteTokens += Math.ceil(approxTokens * 0.99);
+        // We don't add to totalWasteTokens because we don't automatically strip it.
       }
 
       // 3. Repeated stack traces / large logs
       const traceLines = content.match(/at\s+.*:\d+:\d+/g);
       if (traceLines && traceLines.length > 8) {
-        const approxTokens = Math.ceil(content.length / 4);
-        inefficiencies.push({
-          type: 'logs',
-          description: `Oversized stack trace containing ${traceLines.length} repeat references detected.`,
-          target: 'stack_trace_repeats',
-          approximateTokens: approxTokens,
-          potentialSavingsPercent: 60
-        });
-        totalWasteTokens += Math.ceil(approxTokens * 0.60);
+        const beforeTokens = countTokens(content, req.model);
 
         if (isReversible) {
           const id = `ccr_lg_${Math.random().toString(36).substring(2, 7)}`;
@@ -200,21 +199,27 @@ export class ContextAnalyzer {
           }
           content = filteredLines.join('\n');
         }
+        
+        const afterTokens = countTokens(content, req.model);
+        const saved = Math.max(0, beforeTokens - afterTokens);
+
+        if (saved > 0) {
+          inefficiencies.push({
+            type: 'logs',
+            description: `Oversized stack trace containing ${traceLines.length} repeat references detected.`,
+            target: 'stack_trace_repeats',
+            approximateTokens: saved,
+            potentialSavingsPercent: 60
+          });
+          totalWasteTokens += saved;
+        }
       }
 
       // 4. Binary/Base64 payloads
       const base64Regex = /([A-Za-z0-9+/]{100,})/g;
-      const base64Matches = content.match(base64Regex);
-      if (base64Matches) {
-        const approxTokens = Math.ceil(content.length / 4);
-        inefficiencies.push({
-          type: 'binary',
-          description: `Embedded raw binary/base64 block detected.`,
-          target: 'base64_data',
-          approximateTokens: approxTokens,
-          potentialSavingsPercent: 100
-        });
-        totalWasteTokens += approxTokens;
+      if (base64Regex.test(content)) {
+        base64Regex.lastIndex = 0;
+        const beforeTokens = countTokens(content, req.model);
         
         if (isReversible) {
           const id = `ccr_bn_${Math.random().toString(36).substring(2, 7)}`;
@@ -222,6 +227,20 @@ export class ContextAnalyzer {
           content = content.replace(base64Regex, `[TokenWall Reversible Content: ${id} - Stripped base64 binary block. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the original binary data.]`);
         } else {
           content = content.replace(base64Regex, '[TokenWall: Stripped base64 binary block]');
+        }
+        
+        const afterTokens = countTokens(content, req.model);
+        const saved = Math.max(0, beforeTokens - afterTokens);
+        
+        if (saved > 0) {
+          inefficiencies.push({
+            type: 'binary',
+            description: `Embedded raw binary/base64 block detected.`,
+            target: 'base64_data',
+            approximateTokens: saved,
+            potentialSavingsPercent: 100
+          });
+          totalWasteTokens += saved;
         }
       }
 
@@ -233,19 +252,22 @@ export class ContextAnalyzer {
           const rawJson = jsonMatch[1];
           if (rawJson.length > 250) {
             const crushedJson = JsonCrusher.crush(rawJson);
-            const beforeTokens = Math.ceil(rawJson.length / 4);
-            const afterTokens = Math.ceil(crushedJson.length / 4);
+            
+            const beforeTokens = countTokens(jsonMatch[0], req.model);
+            const newBlock = `\`\`\`json\n${crushedJson}\n\`\`\``;
+            const afterTokens = countTokens(newBlock, req.model);
             const saved = Math.max(0, beforeTokens - afterTokens);
-            if (saved > 20) {
+            
+            if (saved > 10) {
               inefficiencies.push({
                 type: 'json',
                 description: `Large JSON block minified.`,
                 target: 'json_block',
-                approximateTokens: beforeTokens,
+                approximateTokens: saved,
                 potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
               });
               totalWasteTokens += saved;
-              content = content.replace(jsonMatch[0], `\`\`\`json\n${crushedJson}\n\`\`\``);
+              content = content.replace(jsonMatch[0], newBlock);
             }
           }
         }
@@ -260,29 +282,33 @@ export class ContextAnalyzer {
           const rawCode = codeMatch[2];
           if (rawCode.length > 300) {
             const compressedCode = CodeCompressor.compress(rawCode);
-            const beforeTokens = Math.ceil(rawCode.length / 4);
-            const afterTokens = Math.ceil(compressedCode.length / 4);
+            
+            let newBlock = '';
+            let id = '';
+            if (isReversible) {
+              id = `ccr_cd_${Math.random().toString(36).substring(2, 7)}`;
+              newBlock = `[TokenWall Reversible Content: ${id} - Code comments stripped to save tokens. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the comments/docstrings.]\n\`\`\`${lang}\n${compressedCode}\n\`\`\``;
+            } else {
+              newBlock = `\`\`\`${lang}\n${compressedCode}\n\`\`\``;
+            }
+            
+            const beforeTokens = countTokens(codeMatch[0], req.model);
+            const afterTokens = countTokens(newBlock, req.model);
             const saved = Math.max(0, beforeTokens - afterTokens);
-            if (saved > 30) {
+            
+            if (saved > 10) {
               inefficiencies.push({
                 type: 'code',
                 description: `Code comments and whitespace compressed in ${lang} block.`,
                 target: `${lang}_code_block`,
-                approximateTokens: beforeTokens,
+                approximateTokens: saved,
                 potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
               });
               totalWasteTokens += saved;
-              
               if (isReversible) {
-                const id = `ccr_cd_${Math.random().toString(36).substring(2, 7)}`;
                 cachedContents.push({ id, content: rawCode });
-                content = content.replace(
-                  codeMatch[0],
-                  `[TokenWall Reversible Content: ${id} - Code comments stripped to save tokens. Use tokenwall_retrieve_content tool with content_id='${id}' if you need the comments/docstrings.]\n\`\`\`${lang}\n${compressedCode}\n\`\`\``
-                );
-              } else {
-                content = content.replace(codeMatch[0], `\`\`\`${lang}\n${compressedCode}\n\`\`\``);
               }
+              content = content.replace(codeMatch[0], newBlock);
             }
           }
         }

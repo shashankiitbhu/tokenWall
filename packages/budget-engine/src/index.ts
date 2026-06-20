@@ -22,9 +22,7 @@ export class BudgetEvaluator {
     const warnings: string[] = [];
     
     let dbBudgets = this.db.getBudgets(projectId);
-    if (dbBudgets.length === 0) {
-      this.initDefaultBudgets(projectId);
-    }
+    this.initDefaultBudgets(projectId);
 
     const reservation = this.db.reserveBudget(projectId, sessionId, requestId, estimatedCost, provider, model);
 

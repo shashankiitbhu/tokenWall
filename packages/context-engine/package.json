@@ -5,6 +5,7 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@tokenwall/core": "file:../core",
-    "@tokenwall/providers": "file:../providers"
+    "@tokenwall/providers": "file:../providers",
+    "@tokenwall/estimators": "file:../estimators"
   }
 }
