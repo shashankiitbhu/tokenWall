@@ -5,7 +5,8 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@tokenwall/core": "file:../core",
+    "@tokenwall/estimators": "file:../estimators",
     "@tokenwall/providers": "file:../providers",
-    "@tokenwall/estimators": "file:../estimators"
+    "magika": "^1.0.0"
   }
 }

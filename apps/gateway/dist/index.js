@@ -751,7 +751,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Pre-flight validation
     const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
     const config = configManager.getConfig();
-    const contextReport = contextAnalyzer.analyze(parsedRequest, config);
+    const contextReport = await contextAnalyzer.analyze(parsedRequest, config);
     const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
     // Prompt Optimization (heuristic compression preview)
     const userMessages = parsedRequest.messages.filter(m => m.role === 'user');

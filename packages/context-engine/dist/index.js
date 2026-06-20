@@ -2,15 +2,64 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ContextAnalyzer = exports.CacheAligner = exports.CodeCompressor = exports.JsonCrusher = void 0;
 const estimators_1 = require("@tokenwall/estimators");
+let _magikaInstance = null;
+async function getMagika() {
+    if (!_magikaInstance) {
+        try {
+            const magikaModule = require('magika/node');
+            const Magika = magikaModule.MagikaNode || magikaModule.Magika;
+            if (Magika && typeof Magika.create === 'function') {
+                _magikaInstance = await Magika.create();
+            }
+            else if (Magika) {
+                const inst = new Magika();
+                if (typeof inst.load === 'function')
+                    await inst.load();
+                _magikaInstance = inst;
+            }
+        }
+        catch (e) {
+            // console.warn('[TokenWall] Magika not available. Falling back to heuristic detection.');
+        }
+    }
+    return _magikaInstance;
+}
 class JsonCrusher {
     static crush(jsonStr) {
         try {
             const parsed = JSON.parse(jsonStr);
-            // Minify JSON
-            return JSON.stringify(parsed);
+            const walk = (obj) => {
+                if (Array.isArray(obj)) {
+                    if (obj.length > 3) {
+                        return [
+                            walk(obj[0]),
+                            walk(obj[1]),
+                            walk(obj[2]),
+                            `... [TokenWall: ${obj.length - 3} more items truncated]`
+                        ];
+                    }
+                    return obj.map(walk);
+                }
+                else if (obj && typeof obj === 'object') {
+                    const newObj = {};
+                    for (const key of Object.keys(obj)) {
+                        newObj[key] = walk(obj[key]);
+                    }
+                    return newObj;
+                }
+                else if (typeof obj === 'string' && obj.length > 200) {
+                    // Entropy Preservation: Preserve high-entropy strings like UUIDs/Tokens
+                    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(obj);
+                    if (!isUuid) {
+                        return obj.substring(0, 100) + '... [TokenWall: Truncated value]';
+                    }
+                }
+                return obj;
+            };
+            return JSON.stringify(walk(parsed));
         }
         catch {
-            // Best effort whitespace compression
+            // Best effort whitespace compression if invalid JSON
             return jsonStr.replace(/\s+/g, '').trim();
         }
     }
@@ -76,7 +125,7 @@ class CacheAligner {
 }
 exports.CacheAligner = CacheAligner;
 class ContextAnalyzer {
-    analyze(req, config) {
+    async analyze(req, config) {
         const inefficiencies = [];
         let totalWasteTokens = 0;
         const cleanMessages = JSON.parse(JSON.stringify(req.messages));
@@ -205,6 +254,50 @@ class ContextAnalyzer {
                         potentialSavingsPercent: 100
                     });
                     totalWasteTokens += saved;
+                }
+            }
+            // 4.5 Magika Detection for raw unstructured payloads
+            if (content.length > 1000 && !content.includes('```')) {
+                const magika = await getMagika();
+                if (magika) {
+                    try {
+                        const bytes = new TextEncoder().encode(content.substring(0, 4000));
+                        const prediction = await magika.identifyBytes(bytes);
+                        const label = prediction?.label || prediction;
+                        if (label === 'json' || label === 'jsonl') {
+                            const crushed = JsonCrusher.crush(content);
+                            const saved = (0, estimators_1.countTokens)(content, req.model) - (0, estimators_1.countTokens)(crushed, req.model);
+                            if (saved > 0) {
+                                totalWasteTokens += saved;
+                                content = `\`\`\`json\n${crushed}\n\`\`\``;
+                                inefficiencies.push({
+                                    type: 'json',
+                                    description: `Magika detected raw JSON. Applied Structural Mask and truncation.`,
+                                    target: 'raw_json',
+                                    approximateTokens: saved,
+                                    potentialSavingsPercent: 80
+                                });
+                            }
+                        }
+                        else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label)) {
+                            const compressed = CodeCompressor.compress(content);
+                            const saved = (0, estimators_1.countTokens)(content, req.model) - (0, estimators_1.countTokens)(compressed, req.model);
+                            if (saved > 0) {
+                                totalWasteTokens += saved;
+                                content = `\`\`\`${label}\n${compressed}\n\`\`\``;
+                                inefficiencies.push({
+                                    type: 'code',
+                                    description: `Magika detected raw ${label} code. Applied Code Compression.`,
+                                    target: 'raw_code',
+                                    approximateTokens: saved,
+                                    potentialSavingsPercent: 50
+                                });
+                            }
+                        }
+                    }
+                    catch (e) {
+                        // Silently ignore Magika errors
+                    }
                 }
             }
             // 5. JSON Crushing

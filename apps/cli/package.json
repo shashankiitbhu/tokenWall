@@ -1,6 +1,6 @@
 {
   "name": "tokenwall",
-  "version": "1.0.22",
+  "version": "1.0.24",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -15,7 +15,8 @@
     "build": "node build.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^11.8.1",
+    "magika": "latest"
   },
   "devDependencies": {
     "@tokenwall/core": "file:../../packages/core",

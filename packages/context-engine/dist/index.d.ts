@@ -30,5 +30,5 @@ export declare class CacheAligner {
     }[];
 }
 export declare class ContextAnalyzer {
-    analyze(req: NormalizedRequest, config?: TokenWallConfig): ContextReport;
+    analyze(req: NormalizedRequest, config?: TokenWallConfig): Promise<ContextReport>;
 }

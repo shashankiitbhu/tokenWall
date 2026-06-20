@@ -17,14 +17,59 @@ export interface ContextReport {
   cachedContents: { id: string; content: string }[];
 }
 
+let _magikaInstance: any = null;
+async function getMagika() {
+  if (!_magikaInstance) {
+    try {
+      const magikaModule = require('magika/node');
+      const Magika = magikaModule.MagikaNode || magikaModule.Magika;
+      if (Magika && typeof Magika.create === 'function') {
+        _magikaInstance = await Magika.create();
+      } else if (Magika) {
+        const inst = new Magika();
+        if (typeof inst.load === 'function') await inst.load();
+        _magikaInstance = inst;
+      }
+    } catch (e) {
+      // console.warn('[TokenWall] Magika not available. Falling back to heuristic detection.');
+    }
+  }
+  return _magikaInstance;
+}
+
 export class JsonCrusher {
   static crush(jsonStr: string): string {
     try {
       const parsed = JSON.parse(jsonStr);
-      // Minify JSON
-      return JSON.stringify(parsed);
+      const walk = (obj: any): any => {
+        if (Array.isArray(obj)) {
+          if (obj.length > 3) {
+            return [
+              walk(obj[0]),
+              walk(obj[1]),
+              walk(obj[2]),
+              `... [TokenWall: ${obj.length - 3} more items truncated]`
+            ];
+          }
+          return obj.map(walk);
+        } else if (obj && typeof obj === 'object') {
+          const newObj: any = {};
+          for (const key of Object.keys(obj)) {
+            newObj[key] = walk(obj[key]);
+          }
+          return newObj;
+        } else if (typeof obj === 'string' && obj.length > 200) {
+          // Entropy Preservation: Preserve high-entropy strings like UUIDs/Tokens
+          const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(obj);
+          if (!isUuid) {
+             return obj.substring(0, 100) + '... [TokenWall: Truncated value]';
+          }
+        }
+        return obj;
+      };
+      return JSON.stringify(walk(parsed));
     } catch {
-      // Best effort whitespace compression
+      // Best effort whitespace compression if invalid JSON
       return jsonStr.replace(/\s+/g, '').trim();
     }
   }
@@ -93,7 +138,7 @@ export class CacheAligner {
 }
 
 export class ContextAnalyzer {
-  analyze(req: NormalizedRequest, config?: TokenWallConfig): ContextReport {
+  async analyze(req: NormalizedRequest, config?: TokenWallConfig): Promise<ContextReport> {
     const inefficiencies: InefficiencyItem[] = [];
     let totalWasteTokens = 0;
     const cleanMessages = JSON.parse(JSON.stringify(req.messages)) as NormalizedRequest['messages'];
@@ -242,6 +287,50 @@ export class ContextAnalyzer {
           });
           totalWasteTokens += saved;
         }
+      }
+
+      // 4.5 Magika Detection for raw unstructured payloads
+      if (content.length > 1000 && !content.includes('```')) {
+         const magika = await getMagika();
+         if (magika) {
+           try {
+             const bytes = new TextEncoder().encode(content.substring(0, 4000));
+             const prediction = await magika.identifyBytes(bytes);
+             const label = prediction?.label || prediction;
+             
+             if (label === 'json' || label === 'jsonl') {
+                const crushed = JsonCrusher.crush(content);
+                const saved = countTokens(content, req.model) - countTokens(crushed, req.model);
+                if (saved > 0) {
+                  totalWasteTokens += saved;
+                  content = `\`\`\`json\n${crushed}\n\`\`\``;
+                  inefficiencies.push({
+                    type: 'json',
+                    description: `Magika detected raw JSON. Applied Structural Mask and truncation.`,
+                    target: 'raw_json',
+                    approximateTokens: saved,
+                    potentialSavingsPercent: 80
+                  });
+                }
+             } else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label as string)) {
+                const compressed = CodeCompressor.compress(content);
+                const saved = countTokens(content, req.model) - countTokens(compressed, req.model);
+                if (saved > 0) {
+                  totalWasteTokens += saved;
+                  content = `\`\`\`${label}\n${compressed}\n\`\`\``;
+                  inefficiencies.push({
+                    type: 'code',
+                    description: `Magika detected raw ${label} code. Applied Code Compression.`,
+                    target: 'raw_code',
+                    approximateTokens: saved,
+                    potentialSavingsPercent: 50
+                  });
+                }
+             }
+           } catch (e) {
+             // Silently ignore Magika errors
+           }
+         }
       }
 
       // 5. JSON Crushing

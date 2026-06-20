@@ -34769,9 +34769,9 @@ var require_dist5 = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js
+// ../../node_modules/base64-js/index.js
 var require_base64_js = __commonJS({
-  "../../node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.js"(exports2) {
+  "../../node_modules/base64-js/index.js"(exports2) {
     "use strict";
     exports2.byteLength = byteLength;
     exports2.toByteArray = toByteArray;
@@ -34870,9 +34870,9 @@ var require_base64_js = __commonJS({
   }
 });
 
-// ../../node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.cjs
+// ../../node_modules/js-tiktoken/dist/index.cjs
 var require_dist6 = __commonJS({
-  "../../node_modules/.pnpm/js-tiktoken@1.0.21/node_modules/js-tiktoken/dist/index.cjs"(exports2) {
+  "../../node_modules/js-tiktoken/dist/index.cjs"(exports2) {
     "use strict";
     var base64 = require_base64_js();
     function _interopDefault(e) {
@@ -35476,11 +35476,55 @@ var require_dist9 = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ContextAnalyzer = exports2.CacheAligner = exports2.CodeCompressor = exports2.JsonCrusher = void 0;
     var estimators_1 = require_dist7();
+    var _magikaInstance = null;
+    async function getMagika() {
+      if (!_magikaInstance) {
+        try {
+          const magikaModule = require("magika/node");
+          const Magika = magikaModule.MagikaNode || magikaModule.Magika;
+          if (Magika && typeof Magika.create === "function") {
+            _magikaInstance = await Magika.create();
+          } else if (Magika) {
+            const inst = new Magika();
+            if (typeof inst.load === "function")
+              await inst.load();
+            _magikaInstance = inst;
+          }
+        } catch (e) {
+        }
+      }
+      return _magikaInstance;
+    }
     var JsonCrusher = class {
       static crush(jsonStr) {
         try {
           const parsed = JSON.parse(jsonStr);
-          return JSON.stringify(parsed);
+          const walk = (obj) => {
+            if (Array.isArray(obj)) {
+              if (obj.length > 3) {
+                return [
+                  walk(obj[0]),
+                  walk(obj[1]),
+                  walk(obj[2]),
+                  `... [TokenWall: ${obj.length - 3} more items truncated]`
+                ];
+              }
+              return obj.map(walk);
+            } else if (obj && typeof obj === "object") {
+              const newObj = {};
+              for (const key of Object.keys(obj)) {
+                newObj[key] = walk(obj[key]);
+              }
+              return newObj;
+            } else if (typeof obj === "string" && obj.length > 200) {
+              const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(obj);
+              if (!isUuid) {
+                return obj.substring(0, 100) + "... [TokenWall: Truncated value]";
+              }
+            }
+            return obj;
+          };
+          return JSON.stringify(walk(parsed));
         } catch {
           return jsonStr.replace(/\s+/g, "").trim();
         }
@@ -35535,7 +35579,7 @@ var require_dist9 = __commonJS({
     };
     exports2.CacheAligner = CacheAligner;
     var ContextAnalyzer = class {
-      analyze(req, config) {
+      async analyze(req, config) {
         const inefficiencies = [];
         let totalWasteTokens = 0;
         const cleanMessages = JSON.parse(JSON.stringify(req.messages));
@@ -35655,6 +35699,50 @@ var require_dist9 = __commonJS({
                 potentialSavingsPercent: 100
               });
               totalWasteTokens += saved;
+            }
+          }
+          if (content.length > 1e3 && !content.includes("```")) {
+            const magika = await getMagika();
+            if (magika) {
+              try {
+                const bytes = new TextEncoder().encode(content.substring(0, 4e3));
+                const prediction = await magika.identifyBytes(bytes);
+                const label = prediction?.label || prediction;
+                if (label === "json" || label === "jsonl") {
+                  const crushed = JsonCrusher.crush(content);
+                  const saved = (0, estimators_1.countTokens)(content, req.model) - (0, estimators_1.countTokens)(crushed, req.model);
+                  if (saved > 0) {
+                    totalWasteTokens += saved;
+                    content = `\`\`\`json
+${crushed}
+\`\`\``;
+                    inefficiencies.push({
+                      type: "json",
+                      description: `Magika detected raw JSON. Applied Structural Mask and truncation.`,
+                      target: "raw_json",
+                      approximateTokens: saved,
+                      potentialSavingsPercent: 80
+                    });
+                  }
+                } else if (["python", "javascript", "typescript", "go", "rust", "cpp", "java"].includes(label)) {
+                  const compressed = CodeCompressor.compress(content);
+                  const saved = (0, estimators_1.countTokens)(content, req.model) - (0, estimators_1.countTokens)(compressed, req.model);
+                  if (saved > 0) {
+                    totalWasteTokens += saved;
+                    content = `\`\`\`${label}
+${compressed}
+\`\`\``;
+                    inefficiencies.push({
+                      type: "code",
+                      description: `Magika detected raw ${label} code. Applied Code Compression.`,
+                      target: "raw_code",
+                      approximateTokens: saved,
+                      potentialSavingsPercent: 50
+                    });
+                  }
+                }
+              } catch (e) {
+              }
             }
           }
           if (config?.jsonCrushing !== false) {
@@ -46951,7 +47039,7 @@ ${steeringMsg}`;
       const parsedRequest = providers_1.ProviderRegistry.parseRequest(provider, request.body, request.url);
       const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
       const config = configManager2.getConfig();
-      const contextReport = contextAnalyzer.analyze(parsedRequest, config);
+      const contextReport = await contextAnalyzer.analyze(parsedRequest, config);
       const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
       const userMessages = parsedRequest.messages.filter((m) => m.role === "user");
       const lastUserMsg = userMessages[userMessages.length - 1];
