@@ -20,10 +20,31 @@ class ProviderRegistry {
             };
         }
         if (provider === 'anthropic') {
-            const messages = (body.messages || []).map((m) => ({
-                role: m.role || 'user',
-                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-            }));
+            const messages = (body.messages || []).map((m) => {
+                let contentStr = '';
+                if (typeof m.content === 'string') {
+                    contentStr = m.content;
+                }
+                else if (Array.isArray(m.content)) {
+                    contentStr = m.content
+                        .map((c) => {
+                        if (c.type === 'text')
+                            return c.text || '';
+                        if (c.type === 'tool_use')
+                            return `[Tool Use: ${c.name}]`;
+                        return '';
+                    })
+                        .filter(Boolean)
+                        .join('\n');
+                }
+                else {
+                    contentStr = JSON.stringify(m.content);
+                }
+                return {
+                    role: m.role || 'user',
+                    content: contentStr
+                };
+            });
             return {
                 provider: 'anthropic',
                 model: body.model || 'unknown',
@@ -114,9 +135,7 @@ class ProviderRegistry {
     static parseStreamChunk(provider, chunkText) {
         try {
             if (provider === 'openai') {
-                if (!chunkText.startsWith('data: '))
-                    return null;
-                const jsonStr = chunkText.slice(6).trim();
+                const jsonStr = chunkText.trim();
                 if (jsonStr === '[DONE]')
                     return null;
                 const parsed = JSON.parse(jsonStr);
@@ -128,26 +147,34 @@ class ProviderRegistry {
                 return { text, usage };
             }
             if (provider === 'anthropic') {
-                if (!chunkText.startsWith('data: '))
-                    return null;
-                const jsonStr = chunkText.slice(6).trim();
+                const jsonStr = chunkText.trim();
                 const parsed = JSON.parse(jsonStr);
                 let text = '';
                 let usage;
                 if (parsed.type === 'content_block_delta') {
-                    text = parsed.delta?.text || '';
+                    if (parsed.delta?.type === 'text_delta') {
+                        text = parsed.delta?.text || '';
+                    }
+                    else if (parsed.delta?.type === 'input_json_delta') {
+                        text = parsed.delta?.partial_json || '';
+                    }
                 }
                 else if (parsed.type === 'message_start') {
                     usage = {
                         inputTokens: parsed.message?.usage?.input_tokens || 0,
-                        outputTokens: 0
+                        outputTokens: parsed.message?.usage?.output_tokens || 0
                     };
                 }
                 else if (parsed.type === 'message_delta') {
                     usage = {
-                        inputTokens: 0,
+                        inputTokens: parsed.usage?.input_tokens || 0,
                         outputTokens: parsed.usage?.output_tokens || 0
                     };
+                }
+                else if (parsed.type === 'content_block_start') {
+                    if (parsed.content_block?.type === 'tool_use') {
+                        text = `[Tool Use: ${parsed.content_block.name}]`;
+                    }
                 }
                 return { text, usage };
             }
