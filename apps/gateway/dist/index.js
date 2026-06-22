@@ -121,6 +121,37 @@ server.post('/v1beta/models/*', async (request, reply) => {
     const targetUrl = `${baseUrl}${modelUrl}`;
     return handleInterception('gemini', targetUrl, request, reply);
 });
+function countMessagesTokens(messages, model) {
+    let total = 0;
+    for (const m of messages) {
+        if (m && m.content) {
+            if (typeof m.content === 'string') {
+                total += (0, estimators_1.countTokens)(m.content, model);
+            }
+            else if (Array.isArray(m.content)) {
+                for (const block of m.content) {
+                    if (block && block.type === 'text' && typeof block.text === 'string') {
+                        total += (0, estimators_1.countTokens)(block.text, model);
+                    }
+                }
+            }
+        }
+    }
+    return total;
+}
+function countGeminiContentsTokens(contents, model) {
+    let total = 0;
+    for (const c of contents) {
+        if (c && Array.isArray(c.parts)) {
+            for (const p of c.parts) {
+                if (p && typeof p.text === 'string') {
+                    total += (0, estimators_1.countTokens)(p.text, model);
+                }
+            }
+        }
+    }
+    return total;
+}
 function getOptimizedMessages(originalMessages, cleanMessages, model) {
     if (!originalMessages)
         return originalMessages;
@@ -131,7 +162,7 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
-        if (cleanMsg.role === 'user') {
+        if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
             const opt = promptOptimizer.optimize(newText, model);
             newText = opt.optimizedText;
         }
@@ -167,7 +198,25 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
         if (!fs_1.default.existsSync(logDir))
             fs_1.default.mkdirSync(logDir, { recursive: true });
         const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
-        fs_1.default.writeFileSync(logPath, JSON.stringify(newMessages, null, 2), 'utf8');
+        const unoptimizedTokens = countMessagesTokens(originalMessages, model);
+        const optimizedTokens = countMessagesTokens(newMessages, model);
+        const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
+        const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
+        const logStructure = {
+            unoptimized: {
+                total_tokens: unoptimizedTokens,
+                payload: originalMessages
+            },
+            optimized: {
+                total_tokens: optimizedTokens,
+                payload: newMessages
+            },
+            summary: {
+                tokens_saved: saved,
+                savings_percent: `${pct}%`
+            }
+        };
+        fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
         console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
     }
     catch (err) {
@@ -185,7 +234,7 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
-        if (cleanMsg.role === 'user') {
+        if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
             const opt = promptOptimizer.optimize(newText, model);
             newText = opt.optimizedText;
         }
@@ -212,7 +261,25 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
         if (!fs_1.default.existsSync(logDir))
             fs_1.default.mkdirSync(logDir, { recursive: true });
         const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
-        fs_1.default.writeFileSync(logPath, JSON.stringify(newContents, null, 2), 'utf8');
+        const unoptimizedTokens = countGeminiContentsTokens(originalContents, model);
+        const optimizedTokens = countGeminiContentsTokens(newContents, model);
+        const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
+        const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
+        const logStructure = {
+            unoptimized: {
+                total_tokens: unoptimizedTokens,
+                payload: originalContents
+            },
+            optimized: {
+                total_tokens: optimizedTokens,
+                payload: newContents
+            },
+            summary: {
+                tokens_saved: saved,
+                savings_percent: `${pct}%`
+            }
+        };
+        fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
         console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
     }
     catch (err) {
@@ -916,12 +983,41 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 ...request.body,
                 messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model)
             };
+            // Optimize top-level Anthropic system prompt
+            if (provider === 'anthropic' && finalRequestBody.system) {
+                if (typeof finalRequestBody.system === 'string') {
+                    finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model).optimizedText;
+                }
+                else if (Array.isArray(finalRequestBody.system)) {
+                    finalRequestBody.system = finalRequestBody.system.map((block) => {
+                        if (block && block.type === 'text' && typeof block.text === 'string') {
+                            return {
+                                ...block,
+                                text: promptOptimizer.optimize(block.text, parsedRequest.model).optimizedText
+                            };
+                        }
+                        return block;
+                    });
+                }
+            }
         }
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
                 contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model)
             };
+            // Optimize top-level Gemini systemInstruction
+            if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
+                finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part) => {
+                    if (part && typeof part.text === 'string') {
+                        return {
+                            ...part,
+                            text: promptOptimizer.optimize(part.text, parsedRequest.model).optimizedText
+                        };
+                    }
+                    return part;
+                });
+            }
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
         // Calculate exact tokens saved by re-evaluating the token count

@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import { DBManager, ConfigManager, TokenWallConfig } from '@tokenwall/core';
 import { ProviderRegistry, NormalizedRequest, NormalizedResponse } from '@tokenwall/providers';
-import { calculatePreFlightEstimation, getPricingForModel } from '@tokenwall/estimators';
+import { calculatePreFlightEstimation, getPricingForModel, countTokens } from '@tokenwall/estimators';
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
 import { ContextAnalyzer } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
@@ -130,6 +130,38 @@ server.post('/v1beta/models/*', async (request, reply) => {
   return handleInterception('gemini', targetUrl, request, reply);
 });
 
+function countMessagesTokens(messages: any[], model: string): number {
+  let total = 0;
+  for (const m of messages) {
+    if (m && m.content) {
+      if (typeof m.content === 'string') {
+        total += countTokens(m.content, model);
+      } else if (Array.isArray(m.content)) {
+        for (const block of m.content) {
+          if (block && block.type === 'text' && typeof block.text === 'string') {
+            total += countTokens(block.text, model);
+          }
+        }
+      }
+    }
+  }
+  return total;
+}
+
+function countGeminiContentsTokens(contents: any[], model: string): number {
+  let total = 0;
+  for (const c of contents) {
+    if (c && Array.isArray(c.parts)) {
+      for (const p of c.parts) {
+        if (p && typeof p.text === 'string') {
+          total += countTokens(p.text, model);
+        }
+      }
+    }
+  }
+  return total;
+}
+
 function getOptimizedMessages(
   originalMessages: any[],
   cleanMessages: any[],
@@ -143,7 +175,7 @@ function getOptimizedMessages(
     if (!cleanMsg) continue;
     
     let newText = cleanMsg.content;
-    if (cleanMsg.role === 'user') {
+    if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       const opt = promptOptimizer.optimize(newText, model);
       newText = opt.optimizedText;
     }
@@ -178,7 +210,28 @@ function getOptimizedMessages(
     const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, 'latest_optimized_request.json');
-    fs.writeFileSync(logPath, JSON.stringify(newMessages, null, 2), 'utf8');
+
+    const unoptimizedTokens = countMessagesTokens(originalMessages, model);
+    const optimizedTokens = countMessagesTokens(newMessages, model);
+    const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
+    const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
+
+    const logStructure = {
+      unoptimized: {
+        total_tokens: unoptimizedTokens,
+        payload: originalMessages
+      },
+      optimized: {
+        total_tokens: optimizedTokens,
+        payload: newMessages
+      },
+      summary: {
+        tokens_saved: saved,
+        savings_percent: `${pct}%`
+      }
+    };
+
+    fs.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
     console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
   } catch (err) {
     console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
@@ -200,7 +253,7 @@ function getOptimizedGeminiContents(
     if (!cleanMsg) continue;
     
     let newText = cleanMsg.content;
-    if (cleanMsg.role === 'user') {
+    if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       const opt = promptOptimizer.optimize(newText, model);
       newText = opt.optimizedText;
     }
@@ -226,7 +279,28 @@ function getOptimizedGeminiContents(
     const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, 'latest_optimized_request.json');
-    fs.writeFileSync(logPath, JSON.stringify(newContents, null, 2), 'utf8');
+
+    const unoptimizedTokens = countGeminiContentsTokens(originalContents, model);
+    const optimizedTokens = countGeminiContentsTokens(newContents, model);
+    const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
+    const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
+
+    const logStructure = {
+      unoptimized: {
+        total_tokens: unoptimizedTokens,
+        payload: originalContents
+      },
+      optimized: {
+        total_tokens: optimizedTokens,
+        payload: newContents
+      },
+      summary: {
+        tokens_saved: saved,
+        savings_percent: `${pct}%`
+      }
+    };
+
+    fs.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
     console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
   } catch (err) {
     console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
@@ -979,11 +1053,41 @@ async function handleInterception(
         ...request.body,
         messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model)
       };
+      
+      // Optimize top-level Anthropic system prompt
+      if (provider === 'anthropic' && finalRequestBody.system) {
+        if (typeof finalRequestBody.system === 'string') {
+          finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model).optimizedText;
+        } else if (Array.isArray(finalRequestBody.system)) {
+          finalRequestBody.system = finalRequestBody.system.map((block: any) => {
+            if (block && block.type === 'text' && typeof block.text === 'string') {
+              return {
+                ...block,
+                text: promptOptimizer.optimize(block.text, parsedRequest.model).optimizedText
+              };
+            }
+            return block;
+          });
+        }
+      }
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
         contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model)
       };
+      
+      // Optimize top-level Gemini systemInstruction
+      if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
+        finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part: any) => {
+          if (part && typeof part.text === 'string') {
+            return {
+              ...part,
+              text: promptOptimizer.optimize(part.text, parsedRequest.model).optimizedText
+            };
+          }
+          return part;
+        });
+      }
     }
     finalRequest = { ...parsedRequest, messages: cleanMsgs };
     

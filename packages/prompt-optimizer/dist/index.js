@@ -3,10 +3,35 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PromptOptimizer = void 0;
 const estimators_1 = require("@tokenwall/estimators");
 const CONVERSATIONAL_FILLERS = [
-    // Semantic compression (stripping irrelevant boilerplate)
+    // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
     { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },
-    { pattern: /Available agent types for the Agent tool:[\s\S]*?\(Tools:.*?\)/gi, replacement: '' },
-    { pattern: /The following skills are available for use with the Skill tool:[\s\S]*?security-review: Complete a security review of the pending changes on the current branch/gi, replacement: '' },
+    {
+        pattern: /Available agent types for the Agent tool:[\s\S]*?(?:so they run concurrently\.|\- statusline\-setup: [^\n]*)/gi,
+        replacement: `Available agents (launch concurrently where possible):
+- claude (Default, Tools: *)
+- claude-code-guide (Q&A: Claude Code, CLI, SDK, API. Tools: Bash, Read, WebFetch, WebSearch. Check existing/completed first!)
+- Explore (Read-only sweeping search. Reads excerpts, no audits. Tools: All except Agent, ExitPlanMode, Edit, Write, NotebookEdit)
+- general-purpose (Multi-step tasks/complex research. Tools: *)
+- Plan (Design implementation plans/architect. Tools: All except Agent, ExitPlanMode, Edit, Write, NotebookEdit)
+- statusline-setup (Configure statusline. Tools: Read, Edit)`
+    },
+    {
+        pattern: /The following skills are available for use with the Skill tool:[\s\S]*?(?:\- security\-review: [^\n]*|\- review: [^\n]*|\- run: [^\n]*)/gi,
+        replacement: `Available skills:
+- deep-research (Fact-checked report. Ask clarifying Qs if vague.)
+- update-config (Modify settings.json for hooks, permissions, env vars.)
+- keybindings-help (Customize keys in ~/.claude/keybindings.json.)
+- verify (Verify fixes/PRs by running app & manual check.)
+- code-review (Review diff for bugs/cleanup. --comment or --fix.)
+- simplify (Refactor code for quality/reusability. No bug hunting.)
+- fewer-permission-prompts (Add common Bash/MCP tools to settings.json allowlist.)
+- loop (Run command/prompt on interval, e.g. /loop 5m /foo. Omit interval to self-pace.)
+- claude-api (API/SDK ref. TRIGGER: read BEFORE opening file if Claude/Anthropic/LLM/MCP is named. SKIP: if OpenAI/Gemini/GPT/Llama/Mistral/Ollama is named or in grep 'openai|google.generativeai|genai|mistralai|cohere|ollama')
+- run (Launch/test app. Use project skill or defaults.)
+- init (Init CLAUDE.md with docs.)
+- review (Review PR.)
+- security-review (PR/branch security review.)`
+    },
     // Conversational fillers
     { pattern: /could you please go ahead and/gi, replacement: '' },
     { pattern: /please take a look at/gi, replacement: 'check' },
