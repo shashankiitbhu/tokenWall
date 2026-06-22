@@ -193,35 +193,6 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             }
         }
     }
-    try {
-        const logDir = path_1.default.join(os_1.default.homedir(), '.tokenwall', 'logs');
-        if (!fs_1.default.existsSync(logDir))
-            fs_1.default.mkdirSync(logDir, { recursive: true });
-        const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
-        const unoptimizedTokens = countMessagesTokens(originalMessages, model);
-        const optimizedTokens = countMessagesTokens(newMessages, model);
-        const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
-        const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
-        const logStructure = {
-            unoptimized: {
-                total_tokens: unoptimizedTokens,
-                payload: originalMessages
-            },
-            optimized: {
-                total_tokens: optimizedTokens,
-                payload: newMessages
-            },
-            summary: {
-                tokens_saved: saved,
-                savings_percent: `${pct}%`
-            }
-        };
-        fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
-        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
-    }
-    catch (err) {
-        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
-    }
     return newMessages;
 }
 function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
@@ -255,35 +226,6 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
                 origContent.parts.push({ text: newText });
             }
         }
-    }
-    try {
-        const logDir = path_1.default.join(os_1.default.homedir(), '.tokenwall', 'logs');
-        if (!fs_1.default.existsSync(logDir))
-            fs_1.default.mkdirSync(logDir, { recursive: true });
-        const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
-        const unoptimizedTokens = countGeminiContentsTokens(originalContents, model);
-        const optimizedTokens = countGeminiContentsTokens(newContents, model);
-        const saved = Math.max(0, unoptimizedTokens - optimizedTokens);
-        const pct = unoptimizedTokens > 0 ? Math.round((saved / unoptimizedTokens) * 100) : 0;
-        const logStructure = {
-            unoptimized: {
-                total_tokens: unoptimizedTokens,
-                payload: originalContents
-            },
-            optimized: {
-                total_tokens: optimizedTokens,
-                payload: newContents
-            },
-            summary: {
-                tokens_saved: saved,
-                savings_percent: `${pct}%`
-            }
-        };
-        fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
-        console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
-    }
-    catch (err) {
-        console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
     }
     return newContents;
 }
@@ -1044,6 +986,35 @@ async function handleInterception(provider, targetUrl, request, reply) {
             amount: savingsAmount,
             tokens: savedTokens
         });
+        // Write log for optimized request including the full body (top-level system prompts)
+        try {
+            const logDir = path_1.default.join(os_1.default.homedir(), '.tokenwall', 'logs');
+            if (!fs_1.default.existsSync(logDir))
+                fs_1.default.mkdirSync(logDir, { recursive: true });
+            const logPath = path_1.default.join(logDir, 'latest_optimized_request.json');
+            const unoptimizedTokens = estimation.estimatedInputTokens;
+            const optimizedTokens = optimizedEstimation.estimatedInputTokens;
+            const pct = unoptimizedTokens > 0 ? Math.round((savedTokens / unoptimizedTokens) * 100) : 0;
+            const logStructure = {
+                unoptimized: {
+                    total_tokens: unoptimizedTokens,
+                    payload: request.body
+                },
+                optimized: {
+                    total_tokens: optimizedTokens,
+                    payload: finalRequestBody
+                },
+                summary: {
+                    tokens_saved: savedTokens,
+                    savings_percent: `${pct}%`
+                }
+            };
+            fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
+            console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+        }
+        catch (err) {
+            console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
+        }
     }
     else if (action === 'switch_model') {
         const recommendedModel = chosenModel || (routingOptions.alternatives.length > 0 ? routingOptions.alternatives[0].model : parsedRequest.model);
