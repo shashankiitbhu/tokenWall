@@ -961,8 +961,8 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 });
             }
         }
-        finalRequest = { ...parsedRequest, messages: cleanMsgs };
-        // Calculate exact tokens saved by re-evaluating the token count
+        // Parse the fully optimized body back into a NormalizedRequest to count its exact tokens
+        finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));

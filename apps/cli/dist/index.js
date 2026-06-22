@@ -47218,7 +47218,7 @@ ${steeringMsg}`;
             });
           }
         }
-        finalRequest = { ...parsedRequest, messages: cleanMsgs };
+        finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`\u2714 Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
