@@ -12,6 +12,31 @@ const __dirname = path.dirname(__filename);
 
 const conversationalBoilerplate = "Could you please go ahead and check the file index.ts, and then please write a highly detailed, clean, and production-grade function that handles user authentication using JWT tokens? Make sure to write tests and handle error cases, kindly help me with this. Thank you so much!";
 
+const mockServerLog = `
+2026-06-17T18:00:01Z [INFO] Initializing server on port 8080
+2026-06-17T18:00:02Z [DEBUG] Loaded 453 configurations from database
+2026-06-17T18:00:03Z [TRACE] Request 1234: Incoming payload { id: 1, action: "ping" }
+2026-06-17T18:00:04Z [INFO] Handled Request 1234 successfully
+2026-06-17T18:00:05Z [DEBUG] Connection pool size: 5, active: 1
+2026-06-17T18:00:06Z [TRACE] Request 1235: Incoming payload { id: 2, action: "run" }
+2026-06-17T18:00:07Z [ERROR] Failed to run job! FATAL: NullPointerException at Worker.run(Worker.java:42)
+2026-06-17T18:00:08Z [INFO] Shutting down connection pool
+2026-06-17T18:00:09Z [DEBUG] Connection pool destroyed
+2026-06-17T18:00:10Z [TRACE] System exit code 1
+2026-06-17T18:00:11Z [INFO] Initializing backup server on port 8081
+2026-06-17T18:00:12Z [DEBUG] Loaded 453 configurations from database
+2026-06-17T18:00:13Z [TRACE] Request 1236: Incoming payload { id: 3, action: "ping" }
+2026-06-17T18:00:14Z [INFO] Handled Request 1236 successfully
+2026-06-17T18:00:15Z [DEBUG] Connection pool size: 5, active: 1
+2026-06-17T18:00:16Z [TRACE] Request 1237: Incoming payload { id: 4, action: "ping" }
+2026-06-17T18:00:17Z [INFO] Handled Request 1237 successfully
+2026-06-17T18:00:18Z [DEBUG] Connection pool size: 5, active: 2
+2026-06-17T18:00:19Z [TRACE] Request 1238: Incoming payload { id: 5, action: "ping" }
+2026-06-17T18:00:20Z [INFO] Handled Request 1238 successfully
+2026-06-17T18:00:21Z [DEBUG] Connection pool size: 5, active: 1
+2026-06-17T18:00:22Z [TRACE] System standby...
+`;
+
 const agentSystemPrompt = `You are a helpful assistant. Available agent types for the Agent tool:
 - claude: A general purpose coding agent. It can run tools and write code. Launch it when you need to delegate a task. It runs concurrently.
 - claude-code-guide: Use this for answering questions about Claude Code, CLI, SDK, API. Tools: Bash, Read, WebFetch, WebSearch. Check existing/completed first!
@@ -437,6 +462,33 @@ async function runBenchmark() {
       afterText: report.cleanMessages[0].content,
       beforeTokens: beforeTokens,
       afterTokens: afterTokens,
+      latencyMs: parseFloat(latency.toFixed(2))
+    });
+  }
+
+  // Case 8: Unstructured Log Pruning via Importance Engine
+  {
+    const analyzer = new ContextAnalyzer();
+    const config = { importance: { policy: 'balanced' }, codeCompression: false, jsonCrushing: false };
+    
+    const request = {
+      model: model,
+      messages: [{ role: "user", content: mockServerLog }],
+      tools: []
+    };
+
+    const start = performance.now();
+    const result = await analyzer.analyze(request, config);
+    const latency = performance.now() - start;
+
+    results.push({
+      id: 'importance_scoring_logs',
+      name: 'Importance Log Pruning',
+      description: 'Prunes low-importance (INFO/DEBUG) log lines while preserving ERRORs based on threshold.',
+      beforeText: mockServerLog,
+      afterText: result.cleanMessages[0].content,
+      beforeTokens: countTokens(mockServerLog, model),
+      afterTokens: countTokens(result.cleanMessages[0].content, model),
       latencyMs: parseFloat(latency.toFixed(2))
     });
   }

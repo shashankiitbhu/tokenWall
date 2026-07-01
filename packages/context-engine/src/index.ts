@@ -5,6 +5,7 @@ import * as swc from '@swc/core';
 import { CacheAlignerPipeline } from './cache-aligner';
 
 export * from './cache-aligner';
+export * from './importance';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -248,6 +249,33 @@ export class ContextAnalyzer {
         }
       }
 
+      // 3.5 Unstructured Log Pruning via Importance Scoring
+      if (config?.importance?.policy && config.importance.policy !== 'conservative' && content.length > 1000) {
+        // Only target blocks that look like unstructured logs (lots of lines, not JSON/Code blocks)
+        const linesCount = content.split('\n').length;
+        if (linesCount > 20 && !content.trim().startsWith('```') && !content.trim().startsWith('{') && !content.trim().startsWith('[')) {
+          const importanceEngine = new ImportanceEngine();
+          const beforeTokens = countTokens(content, req.model);
+          const prunedContent = importanceEngine.pruneLogBlock(content, config.importance.policy);
+          
+          if (prunedContent.length < content.length) {
+            const afterTokens = countTokens(prunedContent, req.model);
+            const saved = Math.max(0, beforeTokens - afterTokens);
+            if (saved > 10) {
+              inefficiencies.push({
+                type: 'logs',
+                description: `Unstructured log block pruned using '${config.importance.policy}' Importance Policy. Preserved errors/warnings, dropped noise.`,
+                target: 'unstructured_log_block',
+                approximateTokens: saved,
+                potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
+              });
+              totalWasteTokens += saved;
+              content = prunedContent;
+            }
+          }
+        }
+      }
+
       // 4. Binary/Base64 payloads
       const base64Regex = /([A-Za-z0-9+/]{100,})/g;
       if (base64Regex.test(content)) {
@@ -390,7 +418,7 @@ export class ContextAnalyzer {
     }
 
     // 8. Apply Rolling Context Window
-    const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model);
+    const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model, undefined, config);
     for (const warning of windowResult.warnings) {
       inefficiencies.push({
         type: 'logs',
@@ -431,7 +459,7 @@ export class ContextWindowManager {
     return 128000; // Safe default
   }
 
-  static fitToBudget(messages: any[], model: string, explicitBudget?: number): { messages: any[], warnings: string[] } {
+  static fitToBudget(messages: any[], model: string, explicitBudget?: number, config?: TokenWallConfig): { messages: any[], warnings: string[] } {
     if (!messages || messages.length <= 2) return { messages, warnings: [] };
 
     const totalLimit = explicitBudget || this.getLimitForModel(model);
@@ -458,18 +486,35 @@ export class ContextWindowManager {
 
     let prunedMessages = JSON.parse(JSON.stringify(messages));
     
-    // Identify critical messages
     const systemIndices = prunedMessages.map((m: any, i: number) => m.role === 'system' ? i : -1).filter((i: number) => i !== -1);
     const lastUserIndex = prunedMessages.map((m: any, i: number) => m.role === 'user' ? i : -1).reverse()[0];
     const preserveIndices = new Set([...systemIndices]);
     if (lastUserIndex !== undefined) preserveIndices.add(lastUserIndex);
 
-    // Light Pruning
+    const importanceEngine = new ImportanceEngine();
+    const policy = config?.importance?.policy || 'balanced';
+    const threshold = ImportanceEngine.getThresholdForPolicy(policy);
+    const messageScores = prunedMessages.map((m: any) => {
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      // We take the average score of all lines in the message
+      const lines = content.split('\n');
+      if (lines.length === 0) return 0.5;
+      let total = 0;
+      for (const line of lines) {
+        total += importanceEngine.scoreLine(line, { isLog: false, isCodeBlock: false, isStructuredData: false });
+      }
+      return total / lines.length;
+    });
+
+    // Light Pruning: drop messages below importance threshold or if they are huge old outputs
     if (currentTokens >= lightPruneLimit) {
-      warnings.push(`[TokenWall] Light pruning activated. Dropping huge old outputs.`);
+      warnings.push(`[TokenWall] Light pruning activated. Dropping low-importance / huge old outputs.`);
       for (let i = 0; i < prunedMessages.length; i++) {
-        if (!preserveIndices.has(i) && tokenCounts[i] > 2000 && i < prunedMessages.length - 3) {
-          prunedMessages[i].content = '[TokenWall: Old huge context pruned]';
+        const isHuge = tokenCounts[i] > 2000 && i < prunedMessages.length - 3;
+        const isLowImportance = messageScores[i] < threshold;
+        
+        if (!preserveIndices.has(i) && (isHuge || isLowImportance)) {
+          prunedMessages[i].content = isLowImportance ? '[TokenWall: Low-importance message pruned]' : '[TokenWall: Old huge context pruned]';
           currentTokens -= tokenCounts[i];
           tokenCounts[i] = 10;
         }

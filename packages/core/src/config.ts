@@ -23,6 +23,9 @@ export interface TokenWallConfig {
   jsonCrushing?: boolean;
   codeCompression?: boolean;
   cacheAlignment?: boolean;
+  importance?: {
+    policy: 'conservative' | 'balanced' | 'aggressive';
+  };
 }
 
 const DEFAULT_CONFIG: TokenWallConfig = {
@@ -56,7 +59,10 @@ const DEFAULT_CONFIG: TokenWallConfig = {
   verbositySteering: true,
   jsonCrushing: true,
   codeCompression: true,
-  cacheAlignment: true
+  cacheAlignment: true,
+  importance: {
+    policy: 'balanced'
+  }
 };
 
 export class ConfigManager {
