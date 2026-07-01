@@ -106,7 +106,36 @@ function minifyJsonBlocks(text: string): string {
       out += result[i]; i++;
     }
   }
-  return out;
+}
+
+/**
+ * Context Deduplication: 
+ * Based on concepts from open-source context engineering tools (like Headroom and SemHash),
+ * this function prunes redundant information (e.g., repeating logs or identical paragraphs).
+ * It splits the text into blocks separated by double newlines (`\n\n`), tracks seen blocks using a `Set`,
+ * and replaces large exact duplicate blocks with a placeholder to save waste tokens.
+ */
+function deduplicateContext(text: string): string {
+  const blocks = text.split('\n\n');
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    // Only deduplicate blocks larger than a certain threshold to avoid stripping common short phrases
+    if (trimmed.length > 50) {
+      const normalized = trimmed.toLowerCase();
+      if (seen.has(normalized)) {
+        // Replace with a marker instead of silently dropping, so LLM knows something was here
+        output.push(`[Duplicate content removed]`);
+        continue;
+      }
+      seen.add(normalized);
+    }
+    output.push(block);
+  }
+  
+  return output.join('\n\n');
 }
 
 export class PromptOptimizer {
@@ -115,6 +144,9 @@ export class PromptOptimizer {
     
     // First apply JSON minification
     let optimized = minifyJsonBlocks(prompt);
+
+    // Apply Context Deduplication
+    optimized = deduplicateContext(optimized);
 
     // Apply filler regexes
     for (const item of CONVERSATIONAL_FILLERS) {
