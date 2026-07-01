@@ -357,3 +357,28 @@ To maximize the probability of success over the next 30 days, TokenWall must pri
 > 2. **Do NOT Build**: Do not add multiple LLM providers, cloud synchronization, or billing systems.
 > 3. **Launch Quality Metric**: The VS Code extension must start the daemon silently, inject variables, and intercept Claude Code requests without the developer ever knowing it's there until a budget limit is reached or a spend summary is requested.
 > 4. **Traction Signal**: The key metric to watch is **Weekly Active Users (WAU)** and **Total Prevented Cost** (the sum of budget overruns blocked by TokenWall). Once 1,000 active developers are utilizing the tool locally, initiate the Team Beta program.
+
+
+UPCOMING PLANS FOR IMPROVEMENT
+
+3. Cryptographic Token Handshakes: False
+There are no cryptographic token handshakes or authentication mechanisms implemented for local WebSocket communication.
+
+The WebSocket route /ws/control registered in 
+
+control-plane.ts
+ accepts all incoming connections unconditionally on the local loopback interface:
+
+typescript
+// apps/gateway/src/control-plane.ts:L23-L25
+registerWebsocket(fastify: FastifyInstance) {
+  fastify.get('/ws/control', { websocket: true } as any, (connection: any, req: any) => {
+    console.log('WS Connection established on server');
+    this.clients.add(connection.socket);
+Both the CLI client (
+
+cli/src/index.ts:L58
+) and the VS Code Extension (
+
+vscode-extension/src/extension.ts:L394
+) initiate standard, unauthenticated WebSocket connections to ws://127.0.0.1:1984/ws/control without passing security tokens or performing cryptographic handshakes.

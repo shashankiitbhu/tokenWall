@@ -1,1 +1,823 @@
-(()=>{var __webpack_modules__={822:(e,t,s)=>{"use strict";const n=s(16);const r=s(403);const o=s(556);const i=s(937);const a=s(361);const l=s(208);const c=s(101);const f=s(229);c.createWebSocketStream=n;c.extension=r;c.PerMessageDeflate=o;c.Receiver=i;c.Sender=a;c.Server=f;c.subprotocol=l;c.WebSocket=c;c.WebSocketServer=f;e.exports=c},647:(e,t,s)=>{"use strict";const{EMPTY_BUFFER:n}=s(451);const r=Buffer[Symbol.species];function concat(e,t){if(e.length===0)return n;if(e.length===1)return e[0];const s=Buffer.allocUnsafe(t);let o=0;for(let t=0;t<e.length;t++){const n=e[t];s.set(n,o);o+=n.length}if(o<t){return new r(s.buffer,s.byteOffset,o)}return s}function _mask(e,t,s,n,r){for(let o=0;o<r;o++){s[n+o]=e[o]^t[o&3]}}function _unmask(e,t){for(let s=0;s<e.length;s++){e[s]^=t[s&3]}}function toArrayBuffer(e){if(e.length===e.buffer.byteLength){return e.buffer}return e.buffer.slice(e.byteOffset,e.byteOffset+e.length)}function toBuffer(e){toBuffer.readOnly=true;if(Buffer.isBuffer(e))return e;let t;if(e instanceof ArrayBuffer){t=new r(e)}else if(ArrayBuffer.isView(e)){t=new r(e.buffer,e.byteOffset,e.byteLength)}else{t=Buffer.from(e);toBuffer.readOnly=false}return t}e.exports={concat:concat,mask:_mask,toArrayBuffer:toArrayBuffer,toBuffer:toBuffer,unmask:_unmask};if(!process.env.WS_NO_BUFFER_UTIL){try{const t=s(140);e.exports.mask=function(e,s,n,r,o){if(o<48)_mask(e,s,n,r,o);else t.mask(e,s,n,r,o)};e.exports.unmask=function(e,s){if(e.length<32)_unmask(e,s);else t.unmask(e,s)}}catch(e){}}},451:e=>{"use strict";const t=["nodebuffer","arraybuffer","fragments"];const s=typeof Blob!=="undefined";if(s)t.push("blob");e.exports={BINARY_TYPES:t,CLOSE_TIMEOUT:3e4,EMPTY_BUFFER:Buffer.alloc(0),GUID:"258EAFA5-E914-47DA-95CA-C5AB0DC85B11",hasBlob:s,kForOnEventAttribute:Symbol("kIsForOnEventAttribute"),kListener:Symbol("kListener"),kStatusCode:Symbol("status-code"),kWebSocket:Symbol("websocket"),NOOP:()=>{}}},558:(e,t,s)=>{"use strict";const{kForOnEventAttribute:n,kListener:r}=s(451);const o=Symbol("kCode");const i=Symbol("kData");const a=Symbol("kError");const l=Symbol("kMessage");const c=Symbol("kReason");const f=Symbol("kTarget");const d=Symbol("kType");const h=Symbol("kWasClean");class Event{constructor(e){this[f]=null;this[d]=e}get target(){return this[f]}get type(){return this[d]}}Object.defineProperty(Event.prototype,"target",{enumerable:true});Object.defineProperty(Event.prototype,"type",{enumerable:true});class CloseEvent extends Event{constructor(e,t={}){super(e);this[o]=t.code===undefined?0:t.code;this[c]=t.reason===undefined?"":t.reason;this[h]=t.wasClean===undefined?false:t.wasClean}get code(){return this[o]}get reason(){return this[c]}get wasClean(){return this[h]}}Object.defineProperty(CloseEvent.prototype,"code",{enumerable:true});Object.defineProperty(CloseEvent.prototype,"reason",{enumerable:true});Object.defineProperty(CloseEvent.prototype,"wasClean",{enumerable:true});class ErrorEvent extends Event{constructor(e,t={}){super(e);this[a]=t.error===undefined?null:t.error;this[l]=t.message===undefined?"":t.message}get error(){return this[a]}get message(){return this[l]}}Object.defineProperty(ErrorEvent.prototype,"error",{enumerable:true});Object.defineProperty(ErrorEvent.prototype,"message",{enumerable:true});class MessageEvent extends Event{constructor(e,t={}){super(e);this[i]=t.data===undefined?null:t.data}get data(){return this[i]}}Object.defineProperty(MessageEvent.prototype,"data",{enumerable:true});const u={addEventListener(e,t,s={}){for(const o of this.listeners(e)){if(!s[n]&&o[r]===t&&!o[n]){return}}let o;if(e==="message"){o=function onMessage(e,s){const n=new MessageEvent("message",{data:s?e:e.toString()});n[f]=this;callListener(t,this,n)}}else if(e==="close"){o=function onClose(e,s){const n=new CloseEvent("close",{code:e,reason:s.toString(),wasClean:this._closeFrameReceived&&this._closeFrameSent});n[f]=this;callListener(t,this,n)}}else if(e==="error"){o=function onError(e){const s=new ErrorEvent("error",{error:e,message:e.message});s[f]=this;callListener(t,this,s)}}else if(e==="open"){o=function onOpen(){const e=new Event("open");e[f]=this;callListener(t,this,e)}}else{return}o[n]=!!s[n];o[r]=t;if(s.once){this.once(e,o)}else{this.on(e,o)}},removeEventListener(e,t){for(const s of this.listeners(e)){if(s[r]===t&&!s[n]){this.removeListener(e,s);break}}}};e.exports={CloseEvent:CloseEvent,ErrorEvent:ErrorEvent,Event:Event,EventTarget:u,MessageEvent:MessageEvent};function callListener(e,t,s){if(typeof e==="object"&&e.handleEvent){e.handleEvent.call(e,s)}else{e.call(t,s)}}},403:(e,t,s)=>{"use strict";const{tokenChars:n}=s(651);function push(e,t,s){if(e[t]===undefined)e[t]=[s];else e[t].push(s)}function parse(e){const t=Object.create(null);let s=Object.create(null);let r=false;let o=false;let i=false;let a;let l;let c=-1;let f=-1;let d=-1;let h=0;for(;h<e.length;h++){f=e.charCodeAt(h);if(a===undefined){if(d===-1&&n[f]===1){if(c===-1)c=h}else if(h!==0&&(f===32||f===9)){if(d===-1&&c!==-1)d=h}else if(f===59||f===44){if(c===-1){throw new SyntaxError(`Unexpected character at index ${h}`)}if(d===-1)d=h;const n=e.slice(c,d);if(f===44){push(t,n,s);s=Object.create(null)}else{a=n}c=d=-1}else{throw new SyntaxError(`Unexpected character at index ${h}`)}}else if(l===undefined){if(d===-1&&n[f]===1){if(c===-1)c=h}else if(f===32||f===9){if(d===-1&&c!==-1)d=h}else if(f===59||f===44){if(c===-1){throw new SyntaxError(`Unexpected character at index ${h}`)}if(d===-1)d=h;push(s,e.slice(c,d),true);if(f===44){push(t,a,s);s=Object.create(null);a=undefined}c=d=-1}else if(f===61&&c!==-1&&d===-1){l=e.slice(c,h);c=d=-1}else{throw new SyntaxError(`Unexpected character at index ${h}`)}}else{if(o){if(n[f]!==1){throw new SyntaxError(`Unexpected character at index ${h}`)}if(c===-1)c=h;else if(!r)r=true;o=false}else if(i){if(n[f]===1){if(c===-1)c=h}else if(f===34&&c!==-1){i=false;d=h}else if(f===92){o=true}else{throw new SyntaxError(`Unexpected character at index ${h}`)}}else if(f===34&&e.charCodeAt(h-1)===61){i=true}else if(d===-1&&n[f]===1){if(c===-1)c=h}else if(c!==-1&&(f===32||f===9)){if(d===-1)d=h}else if(f===59||f===44){if(c===-1){throw new SyntaxError(`Unexpected character at index ${h}`)}if(d===-1)d=h;let n=e.slice(c,d);if(r){n=n.replace(/\\/g,"");r=false}push(s,l,n);if(f===44){push(t,a,s);s=Object.create(null);a=undefined}l=undefined;c=d=-1}else{throw new SyntaxError(`Unexpected character at index ${h}`)}}}if(c===-1||i||f===32||f===9){throw new SyntaxError("Unexpected end of input")}if(d===-1)d=h;const u=e.slice(c,d);if(a===undefined){push(t,u,s)}else{if(l===undefined){push(s,u,true)}else if(r){push(s,l,u.replace(/\\/g,""))}else{push(s,l,u)}push(t,a,s)}return t}function format(e){return Object.keys(e).map((t=>{let s=e[t];if(!Array.isArray(s))s=[s];return s.map((e=>[t].concat(Object.keys(e).map((t=>{let s=e[t];if(!Array.isArray(s))s=[s];return s.map((e=>e===true?t:`${t}=${e}`)).join("; ")}))).join("; "))).join(", ")})).join(", ")}e.exports={format:format,parse:parse}},986:e=>{"use strict";const t=Symbol("kDone");const s=Symbol("kRun");class Limiter{constructor(e){this[t]=()=>{this.pending--;this[s]()};this.concurrency=e||Infinity;this.jobs=[];this.pending=0}add(e){this.jobs.push(e);this[s]()}[s](){if(this.pending===this.concurrency)return;if(this.jobs.length){const e=this.jobs.shift();this.pending++;e(this[t])}}}e.exports=Limiter},556:(e,t,s)=>{"use strict";const n=s(106);const r=s(647);const o=s(986);const{kStatusCode:i}=s(451);const a=Buffer[Symbol.species];const l=Buffer.from([0,0,255,255]);const c=Symbol("permessage-deflate");const f=Symbol("total-length");const d=Symbol("callback");const h=Symbol("buffers");const u=Symbol("error");let p;class PerMessageDeflate{constructor(e){this._options=e||{};this._threshold=this._options.threshold!==undefined?this._options.threshold:1024;this._maxPayload=this._options.maxPayload|0;this._isServer=!!this._options.isServer;this._deflate=null;this._inflate=null;this.params=null;if(!p){const e=this._options.concurrencyLimit!==undefined?this._options.concurrencyLimit:10;p=new o(e)}}static get extensionName(){return"permessage-deflate"}offer(){const e={};if(this._options.serverNoContextTakeover){e.server_no_context_takeover=true}if(this._options.clientNoContextTakeover){e.client_no_context_takeover=true}if(this._options.serverMaxWindowBits){e.server_max_window_bits=this._options.serverMaxWindowBits}if(this._options.clientMaxWindowBits){e.client_max_window_bits=this._options.clientMaxWindowBits}else if(this._options.clientMaxWindowBits==null){e.client_max_window_bits=true}return e}accept(e){e=this.normalizeParams(e);this.params=this._isServer?this.acceptAsServer(e):this.acceptAsClient(e);return this.params}cleanup(){if(this._inflate){this._inflate.close();this._inflate=null}if(this._deflate){const e=this._deflate[d];this._deflate.close();this._deflate=null;if(e){e(new Error("The deflate stream was closed while data was being processed"))}}}acceptAsServer(e){const t=this._options;const s=e.find((e=>{if(t.serverNoContextTakeover===false&&e.server_no_context_takeover||e.server_max_window_bits&&(t.serverMaxWindowBits===false||typeof t.serverMaxWindowBits==="number"&&t.serverMaxWindowBits>e.server_max_window_bits)||typeof t.clientMaxWindowBits==="number"&&!e.client_max_window_bits){return false}return true}));if(!s){throw new Error("None of the extension offers can be accepted")}if(t.serverNoContextTakeover){s.server_no_context_takeover=true}if(t.clientNoContextTakeover){s.client_no_context_takeover=true}if(typeof t.serverMaxWindowBits==="number"){s.server_max_window_bits=t.serverMaxWindowBits}if(typeof t.clientMaxWindowBits==="number"){s.client_max_window_bits=t.clientMaxWindowBits}else if(s.client_max_window_bits===true||t.clientMaxWindowBits===false){delete s.client_max_window_bits}return s}acceptAsClient(e){const t=e[0];if(this._options.clientNoContextTakeover===false&&t.client_no_context_takeover){throw new Error('Unexpected parameter "client_no_context_takeover"')}if(!t.client_max_window_bits){if(typeof this._options.clientMaxWindowBits==="number"){t.client_max_window_bits=this._options.clientMaxWindowBits}}else if(this._options.clientMaxWindowBits===false||typeof this._options.clientMaxWindowBits==="number"&&t.client_max_window_bits>this._options.clientMaxWindowBits){throw new Error('Unexpected or invalid parameter "client_max_window_bits"')}return t}normalizeParams(e){e.forEach((e=>{Object.keys(e).forEach((t=>{let s=e[t];if(s.length>1){throw new Error(`Parameter "${t}" must have only a single value`)}s=s[0];if(t==="client_max_window_bits"){if(s!==true){const e=+s;if(!Number.isInteger(e)||e<8||e>15){throw new TypeError(`Invalid value for parameter "${t}": ${s}`)}s=e}else if(!this._isServer){throw new TypeError(`Invalid value for parameter "${t}": ${s}`)}}else if(t==="server_max_window_bits"){const e=+s;if(!Number.isInteger(e)||e<8||e>15){throw new TypeError(`Invalid value for parameter "${t}": ${s}`)}s=e}else if(t==="client_no_context_takeover"||t==="server_no_context_takeover"){if(s!==true){throw new TypeError(`Invalid value for parameter "${t}": ${s}`)}}else{throw new Error(`Unknown parameter "${t}"`)}e[t]=s}))}));return e}decompress(e,t,s){p.add((n=>{this._decompress(e,t,((e,t)=>{n();s(e,t)}))}))}compress(e,t,s){p.add((n=>{this._compress(e,t,((e,t)=>{n();s(e,t)}))}))}_decompress(e,t,s){const o=this._isServer?"client":"server";if(!this._inflate){const e=`${o}_max_window_bits`;const t=typeof this.params[e]!=="number"?n.Z_DEFAULT_WINDOWBITS:this.params[e];this._inflate=n.createInflateRaw({...this._options.zlibInflateOptions,windowBits:t});this._inflate[c]=this;this._inflate[f]=0;this._inflate[h]=[];this._inflate.on("error",inflateOnError);this._inflate.on("data",inflateOnData)}this._inflate[d]=s;this._inflate.write(e);if(t)this._inflate.write(l);this._inflate.flush((()=>{const e=this._inflate[u];if(e){this._inflate.close();this._inflate=null;s(e);return}const n=r.concat(this._inflate[h],this._inflate[f]);if(this._inflate._readableState.endEmitted){this._inflate.close();this._inflate=null}else{this._inflate[f]=0;this._inflate[h]=[];if(t&&this.params[`${o}_no_context_takeover`]){this._inflate.reset()}}s(null,n)}))}_compress(e,t,s){const o=this._isServer?"server":"client";if(!this._deflate){const e=`${o}_max_window_bits`;const t=typeof this.params[e]!=="number"?n.Z_DEFAULT_WINDOWBITS:this.params[e];this._deflate=n.createDeflateRaw({...this._options.zlibDeflateOptions,windowBits:t});this._deflate[f]=0;this._deflate[h]=[];this._deflate.on("data",deflateOnData)}this._deflate[d]=s;this._deflate.write(e);this._deflate.flush(n.Z_SYNC_FLUSH,(()=>{if(!this._deflate){return}let e=r.concat(this._deflate[h],this._deflate[f]);if(t){e=new a(e.buffer,e.byteOffset,e.length-4)}this._deflate[d]=null;this._deflate[f]=0;this._deflate[h]=[];if(t&&this.params[`${o}_no_context_takeover`]){this._deflate.reset()}s(null,e)}))}}e.exports=PerMessageDeflate;function deflateOnData(e){this[h].push(e);this[f]+=e.length}function inflateOnData(e){this[f]+=e.length;if(this[c]._maxPayload<1||this[f]<=this[c]._maxPayload){this[h].push(e);return}this[u]=new RangeError("Max payload size exceeded");this[u].code="WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";this[u][i]=1009;this.removeListener("data",inflateOnData);this.reset()}function inflateOnError(e){this[c]._inflate=null;if(this[u]){this[d](this[u]);return}e[i]=1007;this[d](e)}},937:(e,t,s)=>{"use strict";const{Writable:n}=s(203);const r=s(556);const{BINARY_TYPES:o,EMPTY_BUFFER:i,kStatusCode:a,kWebSocket:l}=s(451);const{concat:c,toArrayBuffer:f,unmask:d}=s(647);const{isValidStatusCode:h,isValidUTF8:u}=s(651);const p=Buffer[Symbol.species];const _=0;const m=1;const g=2;const b=3;const y=4;const S=5;const k=6;class Receiver extends n{constructor(e={}){super();this._allowSynchronousEvents=e.allowSynchronousEvents!==undefined?e.allowSynchronousEvents:true;this._binaryType=e.binaryType||o[0];this._extensions=e.extensions||{};this._isServer=!!e.isServer;this._maxBufferedChunks=e.maxBufferedChunks|0;this._maxFragments=e.maxFragments|0;this._maxPayload=e.maxPayload|0;this._skipUTF8Validation=!!e.skipUTF8Validation;this[l]=undefined;this._bufferedBytes=0;this._buffers=[];this._compressed=false;this._payloadLength=0;this._mask=undefined;this._fragmented=0;this._masked=false;this._fin=false;this._opcode=0;this._totalPayloadLength=0;this._messageLength=0;this._fragments=[];this._errored=false;this._loop=false;this._state=_}_write(e,t,s){if(this._opcode===8&&this._state==_)return s();if(this._maxBufferedChunks>0&&this._buffers.length>=this._maxBufferedChunks){s(this.createError(RangeError,"Too many buffered chunks",false,1008,"WS_ERR_TOO_MANY_BUFFERED_PARTS"));return}this._bufferedBytes+=e.length;this._buffers.push(e);this.startLoop(s)}consume(e){this._bufferedBytes-=e;if(e===this._buffers[0].length)return this._buffers.shift();if(e<this._buffers[0].length){const t=this._buffers[0];this._buffers[0]=new p(t.buffer,t.byteOffset+e,t.length-e);return new p(t.buffer,t.byteOffset,e)}const t=Buffer.allocUnsafe(e);do{const s=this._buffers[0];const n=t.length-e;if(e>=s.length){t.set(this._buffers.shift(),n)}else{t.set(new Uint8Array(s.buffer,s.byteOffset,e),n);this._buffers[0]=new p(s.buffer,s.byteOffset+e,s.length-e)}e-=s.length}while(e>0);return t}startLoop(e){this._loop=true;do{switch(this._state){case _:this.getInfo(e);break;case m:this.getPayloadLength16(e);break;case g:this.getPayloadLength64(e);break;case b:this.getMask();break;case y:this.getData(e);break;case S:case k:this._loop=false;return}}while(this._loop);if(!this._errored)e()}getInfo(e){if(this._bufferedBytes<2){this._loop=false;return}const t=this.consume(2);if((t[0]&48)!==0){const t=this.createError(RangeError,"RSV2 and RSV3 must be clear",true,1002,"WS_ERR_UNEXPECTED_RSV_2_3");e(t);return}const s=(t[0]&64)===64;if(s&&!this._extensions[r.extensionName]){const t=this.createError(RangeError,"RSV1 must be clear",true,1002,"WS_ERR_UNEXPECTED_RSV_1");e(t);return}this._fin=(t[0]&128)===128;this._opcode=t[0]&15;this._payloadLength=t[1]&127;if(this._opcode===0){if(s){const t=this.createError(RangeError,"RSV1 must be clear",true,1002,"WS_ERR_UNEXPECTED_RSV_1");e(t);return}if(!this._fragmented){const t=this.createError(RangeError,"invalid opcode 0",true,1002,"WS_ERR_INVALID_OPCODE");e(t);return}this._opcode=this._fragmented}else if(this._opcode===1||this._opcode===2){if(this._fragmented){const t=this.createError(RangeError,`invalid opcode ${this._opcode}`,true,1002,"WS_ERR_INVALID_OPCODE");e(t);return}this._compressed=s}else if(this._opcode>7&&this._opcode<11){if(!this._fin){const t=this.createError(RangeError,"FIN must be set",true,1002,"WS_ERR_EXPECTED_FIN");e(t);return}if(s){const t=this.createError(RangeError,"RSV1 must be clear",true,1002,"WS_ERR_UNEXPECTED_RSV_1");e(t);return}if(this._payloadLength>125||this._opcode===8&&this._payloadLength===1){const t=this.createError(RangeError,`invalid payload length ${this._payloadLength}`,true,1002,"WS_ERR_INVALID_CONTROL_PAYLOAD_LENGTH");e(t);return}}else{const t=this.createError(RangeError,`invalid opcode ${this._opcode}`,true,1002,"WS_ERR_INVALID_OPCODE");e(t);return}if(!this._fin&&!this._fragmented)this._fragmented=this._opcode;this._masked=(t[1]&128)===128;if(this._isServer){if(!this._masked){const t=this.createError(RangeError,"MASK must be set",true,1002,"WS_ERR_EXPECTED_MASK");e(t);return}}else if(this._masked){const t=this.createError(RangeError,"MASK must be clear",true,1002,"WS_ERR_UNEXPECTED_MASK");e(t);return}if(this._payloadLength===126)this._state=m;else if(this._payloadLength===127)this._state=g;else this.haveLength(e)}getPayloadLength16(e){if(this._bufferedBytes<2){this._loop=false;return}this._payloadLength=this.consume(2).readUInt16BE(0);this.haveLength(e)}getPayloadLength64(e){if(this._bufferedBytes<8){this._loop=false;return}const t=this.consume(8);const s=t.readUInt32BE(0);if(s>Math.pow(2,53-32)-1){const t=this.createError(RangeError,"Unsupported WebSocket frame: payload length > 2^53 - 1",false,1009,"WS_ERR_UNSUPPORTED_DATA_PAYLOAD_LENGTH");e(t);return}this._payloadLength=s*Math.pow(2,32)+t.readUInt32BE(4);this.haveLength(e)}haveLength(e){if(this._payloadLength&&this._opcode<8){this._totalPayloadLength+=this._payloadLength;if(this._totalPayloadLength>this._maxPayload&&this._maxPayload>0){const t=this.createError(RangeError,"Max payload size exceeded",false,1009,"WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");e(t);return}}if(this._masked)this._state=b;else this._state=y}getMask(){if(this._bufferedBytes<4){this._loop=false;return}this._mask=this.consume(4);this._state=y}getData(e){let t=i;if(this._payloadLength){if(this._bufferedBytes<this._payloadLength){this._loop=false;return}t=this.consume(this._payloadLength);if(this._masked&&(this._mask[0]|this._mask[1]|this._mask[2]|this._mask[3])!==0){d(t,this._mask)}}if(this._opcode>7){this.controlMessage(t,e);return}if(this._compressed){this._state=S;this.decompress(t,e);return}if(t.length){if(this._maxFragments>0&&this._fragments.length>=this._maxFragments){const t=this.createError(RangeError,"Too many message fragments",false,1008,"WS_ERR_TOO_MANY_BUFFERED_PARTS");e(t);return}this._messageLength=this._totalPayloadLength;this._fragments.push(t)}this.dataMessage(e)}decompress(e,t){const s=this._extensions[r.extensionName];s.decompress(e,this._fin,((e,s)=>{if(e)return t(e);if(s.length){this._messageLength+=s.length;if(this._messageLength>this._maxPayload&&this._maxPayload>0){const e=this.createError(RangeError,"Max payload size exceeded",false,1009,"WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");t(e);return}if(this._maxFragments>0&&this._fragments.length>=this._maxFragments){const e=this.createError(RangeError,"Too many message fragments",false,1008,"WS_ERR_TOO_MANY_BUFFERED_PARTS");t(e);return}this._fragments.push(s)}this.dataMessage(t);if(this._state===_)this.startLoop(t)}))}dataMessage(e){if(!this._fin){this._state=_;return}const t=this._messageLength;const s=this._fragments;this._totalPayloadLength=0;this._messageLength=0;this._fragmented=0;this._fragments=[];if(this._opcode===2){let n;if(this._binaryType==="nodebuffer"){n=c(s,t)}else if(this._binaryType==="arraybuffer"){n=f(c(s,t))}else if(this._binaryType==="blob"){n=new Blob(s)}else{n=s}if(this._allowSynchronousEvents){this.emit("message",n,true);this._state=_}else{this._state=k;setImmediate((()=>{this.emit("message",n,true);this._state=_;this.startLoop(e)}))}}else{const n=c(s,t);if(!this._skipUTF8Validation&&!u(n)){const t=this.createError(Error,"invalid UTF-8 sequence",true,1007,"WS_ERR_INVALID_UTF8");e(t);return}if(this._state===S||this._allowSynchronousEvents){this.emit("message",n,false);this._state=_}else{this._state=k;setImmediate((()=>{this.emit("message",n,false);this._state=_;this.startLoop(e)}))}}}controlMessage(e,t){if(this._opcode===8){if(e.length===0){this._loop=false;this.emit("conclude",1005,i);this.end()}else{const s=e.readUInt16BE(0);if(!h(s)){const e=this.createError(RangeError,`invalid status code ${s}`,true,1002,"WS_ERR_INVALID_CLOSE_CODE");t(e);return}const n=new p(e.buffer,e.byteOffset+2,e.length-2);if(!this._skipUTF8Validation&&!u(n)){const e=this.createError(Error,"invalid UTF-8 sequence",true,1007,"WS_ERR_INVALID_UTF8");t(e);return}this._loop=false;this.emit("conclude",s,n);this.end()}this._state=_;return}if(this._allowSynchronousEvents){this.emit(this._opcode===9?"ping":"pong",e);this._state=_}else{this._state=k;setImmediate((()=>{this.emit(this._opcode===9?"ping":"pong",e);this._state=_;this.startLoop(t)}))}}createError(e,t,s,n,r){this._loop=false;this._errored=true;const o=new e(s?`Invalid WebSocket frame: ${t}`:t);Error.captureStackTrace(o,this.createError);o.code=r;o[a]=n;return o}}e.exports=Receiver},361:(e,t,s)=>{"use strict";const{Duplex:n}=s(203);const{randomFillSync:r}=s(982);const{types:{isUint8Array:o}}=s(23);const i=s(556);const{EMPTY_BUFFER:a,kWebSocket:l,NOOP:c}=s(451);const{isBlob:f,isValidStatusCode:d}=s(651);const{mask:h,toBuffer:u}=s(647);const p=Symbol("kByteLength");const _=Buffer.alloc(4);const m=8*1024;let g;let b=m;const y=0;const S=1;const k=2;class Sender{constructor(e,t,s){this._extensions=t||{};if(s){this._generateMask=s;this._maskBuffer=Buffer.alloc(4)}this._socket=e;this._firstFragment=true;this._compress=false;this._bufferedBytes=0;this._queue=[];this._state=y;this.onerror=c;this[l]=undefined}static frame(e,t){let s;let n=false;let o=2;let i=false;if(t.mask){s=t.maskBuffer||_;if(t.generateMask){t.generateMask(s)}else{if(b===m){if(g===undefined){g=Buffer.alloc(m)}r(g,0,m);b=0}s[0]=g[b++];s[1]=g[b++];s[2]=g[b++];s[3]=g[b++]}i=(s[0]|s[1]|s[2]|s[3])===0;o=6}let a;if(typeof e==="string"){if((!t.mask||i)&&t[p]!==undefined){a=t[p]}else{e=Buffer.from(e);a=e.length}}else{a=e.length;n=t.mask&&t.readOnly&&!i}let l=a;if(a>=65536){o+=8;l=127}else if(a>125){o+=2;l=126}const c=Buffer.allocUnsafe(n?a+o:o);c[0]=t.fin?t.opcode|128:t.opcode;if(t.rsv1)c[0]|=64;c[1]=l;if(l===126){c.writeUInt16BE(a,2)}else if(l===127){c[2]=c[3]=0;c.writeUIntBE(a,4,6)}if(!t.mask)return[c,e];c[1]|=128;c[o-4]=s[0];c[o-3]=s[1];c[o-2]=s[2];c[o-1]=s[3];if(i)return[c,e];if(n){h(e,s,c,o,a);return[c]}h(e,s,e,0,a);return[c,e]}close(e,t,s,n){let r;if(e===undefined){r=a}else if(typeof e!=="number"||!d(e)){throw new TypeError("First argument must be a valid error code number")}else if(t===undefined||!t.length){r=Buffer.allocUnsafe(2);r.writeUInt16BE(e,0)}else{const s=Buffer.byteLength(t);if(s>123){throw new RangeError("The message must not be greater than 123 bytes")}r=Buffer.allocUnsafe(2+s);r.writeUInt16BE(e,0);if(typeof t==="string"){r.write(t,2)}else if(o(t)){r.set(t,2)}else{throw new TypeError("Second argument must be a string or a Uint8Array")}}const i={[p]:r.length,fin:true,generateMask:this._generateMask,mask:s,maskBuffer:this._maskBuffer,opcode:8,readOnly:false,rsv1:false};if(this._state!==y){this.enqueue([this.dispatch,r,false,i,n])}else{this.sendFrame(Sender.frame(r,i),n)}}ping(e,t,s){let n;let r;if(typeof e==="string"){n=Buffer.byteLength(e);r=false}else if(f(e)){n=e.size;r=false}else{e=u(e);n=e.length;r=u.readOnly}if(n>125){throw new RangeError("The data size must not be greater than 125 bytes")}const o={[p]:n,fin:true,generateMask:this._generateMask,mask:t,maskBuffer:this._maskBuffer,opcode:9,readOnly:r,rsv1:false};if(f(e)){if(this._state!==y){this.enqueue([this.getBlobData,e,false,o,s])}else{this.getBlobData(e,false,o,s)}}else if(this._state!==y){this.enqueue([this.dispatch,e,false,o,s])}else{this.sendFrame(Sender.frame(e,o),s)}}pong(e,t,s){let n;let r;if(typeof e==="string"){n=Buffer.byteLength(e);r=false}else if(f(e)){n=e.size;r=false}else{e=u(e);n=e.length;r=u.readOnly}if(n>125){throw new RangeError("The data size must not be greater than 125 bytes")}const o={[p]:n,fin:true,generateMask:this._generateMask,mask:t,maskBuffer:this._maskBuffer,opcode:10,readOnly:r,rsv1:false};if(f(e)){if(this._state!==y){this.enqueue([this.getBlobData,e,false,o,s])}else{this.getBlobData(e,false,o,s)}}else if(this._state!==y){this.enqueue([this.dispatch,e,false,o,s])}else{this.sendFrame(Sender.frame(e,o),s)}}send(e,t,s){const n=this._extensions[i.extensionName];let r=t.binary?2:1;let o=t.compress;let a;let l;if(typeof e==="string"){a=Buffer.byteLength(e);l=false}else if(f(e)){a=e.size;l=false}else{e=u(e);a=e.length;l=u.readOnly}if(this._firstFragment){this._firstFragment=false;if(o&&n&&n.params[n._isServer?"server_no_context_takeover":"client_no_context_takeover"]){o=a>=n._threshold}this._compress=o}else{o=false;r=0}if(t.fin)this._firstFragment=true;const c={[p]:a,fin:t.fin,generateMask:this._generateMask,mask:t.mask,maskBuffer:this._maskBuffer,opcode:r,readOnly:l,rsv1:o};if(f(e)){if(this._state!==y){this.enqueue([this.getBlobData,e,this._compress,c,s])}else{this.getBlobData(e,this._compress,c,s)}}else if(this._state!==y){this.enqueue([this.dispatch,e,this._compress,c,s])}else{this.dispatch(e,this._compress,c,s)}}getBlobData(e,t,s,n){this._bufferedBytes+=s[p];this._state=k;e.arrayBuffer().then((e=>{if(this._socket.destroyed){const e=new Error("The socket was closed while the blob was being read");process.nextTick(callCallbacks,this,e,n);return}this._bufferedBytes-=s[p];const r=u(e);if(!t){this._state=y;this.sendFrame(Sender.frame(r,s),n);this.dequeue()}else{this.dispatch(r,t,s,n)}})).catch((e=>{process.nextTick(onError,this,e,n)}))}dispatch(e,t,s,n){if(!t){this.sendFrame(Sender.frame(e,s),n);return}const r=this._extensions[i.extensionName];this._bufferedBytes+=s[p];this._state=S;r.compress(e,s.fin,((e,t)=>{if(this._socket.destroyed){const e=new Error("The socket was closed while data was being compressed");callCallbacks(this,e,n);return}this._bufferedBytes-=s[p];this._state=y;s.readOnly=false;this.sendFrame(Sender.frame(t,s),n);this.dequeue()}))}dequeue(){while(this._state===y&&this._queue.length){const e=this._queue.shift();this._bufferedBytes-=e[3][p];Reflect.apply(e[0],this,e.slice(1))}}enqueue(e){this._bufferedBytes+=e[3][p];this._queue.push(e)}sendFrame(e,t){if(e.length===2){this._socket.cork();this._socket.write(e[0]);this._socket.write(e[1],t);this._socket.uncork()}else{this._socket.write(e[0],t)}}}e.exports=Sender;function callCallbacks(e,t,s){if(typeof s==="function")s(t);for(let s=0;s<e._queue.length;s++){const n=e._queue[s];const r=n[n.length-1];if(typeof r==="function")r(t)}}function onError(e,t,s){callCallbacks(e,t,s);e.onerror(t)}},16:(e,t,s)=>{"use strict";const n=s(101);const{Duplex:r}=s(203);function emitClose(e){e.emit("close")}function duplexOnEnd(){if(!this.destroyed&&this._writableState.finished){this.destroy()}}function duplexOnError(e){this.removeListener("error",duplexOnError);this.destroy();if(this.listenerCount("error")===0){this.emit("error",e)}}function createWebSocketStream(e,t){let s=true;const n=new r({...t,autoDestroy:false,emitClose:false,objectMode:false,writableObjectMode:false});e.on("message",(function message(t,s){const r=!s&&n._readableState.objectMode?t.toString():t;if(!n.push(r))e.pause()}));e.once("error",(function error(e){if(n.destroyed)return;s=false;n.destroy(e)}));e.once("close",(function close(){if(n.destroyed)return;n.push(null)}));n._destroy=function(t,r){if(e.readyState===e.CLOSED){r(t);process.nextTick(emitClose,n);return}let o=false;e.once("error",(function error(e){o=true;r(e)}));e.once("close",(function close(){if(!o)r(t);process.nextTick(emitClose,n)}));if(s)e.terminate()};n._final=function(t){if(e.readyState===e.CONNECTING){e.once("open",(function open(){n._final(t)}));return}if(e._socket===null)return;if(e._socket._writableState.finished){t();if(n._readableState.endEmitted)n.destroy()}else{e._socket.once("finish",(function finish(){t()}));e.close()}};n._read=function(){if(e.isPaused)e.resume()};n._write=function(t,s,r){if(e.readyState===e.CONNECTING){e.once("open",(function open(){n._write(t,s,r)}));return}e.send(t,r)};n.on("end",duplexOnEnd);n.on("error",duplexOnError);return n}e.exports=createWebSocketStream},208:(e,t,s)=>{"use strict";const{tokenChars:n}=s(651);function parse(e){const t=new Set;let s=-1;let r=-1;let o=0;for(o;o<e.length;o++){const i=e.charCodeAt(o);if(r===-1&&n[i]===1){if(s===-1)s=o}else if(o!==0&&(i===32||i===9)){if(r===-1&&s!==-1)r=o}else if(i===44){if(s===-1){throw new SyntaxError(`Unexpected character at index ${o}`)}if(r===-1)r=o;const n=e.slice(s,r);if(t.has(n)){throw new SyntaxError(`The "${n}" subprotocol is duplicated`)}t.add(n);s=r=-1}else{throw new SyntaxError(`Unexpected character at index ${o}`)}}if(s===-1||r!==-1){throw new SyntaxError("Unexpected end of input")}const i=e.slice(s,o);if(t.has(i)){throw new SyntaxError(`The "${i}" subprotocol is duplicated`)}t.add(i);return t}e.exports={parse:parse}},651:(e,t,s)=>{"use strict";const{isUtf8:n}=s(181);const{hasBlob:r}=s(451);const o=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,1,1,1,1,0,0,1,1,0,1,1,0,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,0];function isValidStatusCode(e){return e>=1e3&&e<=1014&&e!==1004&&e!==1005&&e!==1006||e>=3e3&&e<=4999}function _isValidUTF8(e){const t=e.length;let s=0;while(s<t){if((e[s]&128)===0){s++}else if((e[s]&224)===192){if(s+1===t||(e[s+1]&192)!==128||(e[s]&254)===192){return false}s+=2}else if((e[s]&240)===224){if(s+2>=t||(e[s+1]&192)!==128||(e[s+2]&192)!==128||e[s]===224&&(e[s+1]&224)===128||e[s]===237&&(e[s+1]&224)===160){return false}s+=3}else if((e[s]&248)===240){if(s+3>=t||(e[s+1]&192)!==128||(e[s+2]&192)!==128||(e[s+3]&192)!==128||e[s]===240&&(e[s+1]&240)===128||e[s]===244&&e[s+1]>143||e[s]>244){return false}s+=4}else{return false}}return true}function isBlob(e){return r&&typeof e==="object"&&typeof e.arrayBuffer==="function"&&typeof e.type==="string"&&typeof e.stream==="function"&&(e[Symbol.toStringTag]==="Blob"||e[Symbol.toStringTag]==="File")}e.exports={isBlob:isBlob,isValidStatusCode:isValidStatusCode,isValidUTF8:_isValidUTF8,tokenChars:o};if(n){e.exports.isValidUTF8=function(e){return e.length<24?_isValidUTF8(e):n(e)}}else if(!process.env.WS_NO_UTF_8_VALIDATE){try{const t=s(285);e.exports.isValidUTF8=function(e){return e.length<32?_isValidUTF8(e):t(e)}}catch(e){}}},229:(e,t,s)=>{"use strict";const n=s(434);const r=s(611);const{Duplex:o}=s(203);const{createHash:i}=s(982);const a=s(403);const l=s(556);const c=s(208);const f=s(101);const{CLOSE_TIMEOUT:d,GUID:h,kWebSocket:u}=s(451);const p=/^[+/0-9A-Za-z]{22}==$/;const _=0;const m=1;const g=2;class WebSocketServer extends n{constructor(e,t){super();e={allowSynchronousEvents:true,autoPong:true,maxBufferedChunks:1024*1024,maxFragments:128*1024,maxPayload:100*1024*1024,skipUTF8Validation:false,perMessageDeflate:false,handleProtocols:null,clientTracking:true,closeTimeout:d,verifyClient:null,noServer:false,backlog:null,server:null,host:null,path:null,port:null,WebSocket:f,...e};if(e.port==null&&!e.server&&!e.noServer||e.port!=null&&(e.server||e.noServer)||e.server&&e.noServer){throw new TypeError('One and only one of the "port", "server", or "noServer" options '+"must be specified")}if(e.port!=null){this._server=r.createServer(((e,t)=>{const s=r.STATUS_CODES[426];t.writeHead(426,{"Content-Length":s.length,"Content-Type":"text/plain"});t.end(s)}));this._server.listen(e.port,e.host,e.backlog,t)}else if(e.server){this._server=e.server}if(this._server){const e=this.emit.bind(this,"connection");this._removeListeners=addListeners(this._server,{listening:this.emit.bind(this,"listening"),error:this.emit.bind(this,"error"),upgrade:(t,s,n)=>{this.handleUpgrade(t,s,n,e)}})}if(e.perMessageDeflate===true)e.perMessageDeflate={};if(e.clientTracking){this.clients=new Set;this._shouldEmitClose=false}this.options=e;this._state=_}address(){if(this.options.noServer){throw new Error('The server is operating in "noServer" mode')}if(!this._server)return null;return this._server.address()}close(e){if(this._state===g){if(e){this.once("close",(()=>{e(new Error("The server is not running"))}))}process.nextTick(emitClose,this);return}if(e)this.once("close",e);if(this._state===m)return;this._state=m;if(this.options.noServer||this.options.server){if(this._server){this._removeListeners();this._removeListeners=this._server=null}if(this.clients){if(!this.clients.size){process.nextTick(emitClose,this)}else{this._shouldEmitClose=true}}else{process.nextTick(emitClose,this)}}else{const e=this._server;this._removeListeners();this._removeListeners=this._server=null;e.close((()=>{emitClose(this)}))}}shouldHandle(e){if(this.options.path){const t=e.url.indexOf("?");const s=t!==-1?e.url.slice(0,t):e.url;if(s!==this.options.path)return false}return true}handleUpgrade(e,t,s,n){t.on("error",socketOnError);const r=e.headers["sec-websocket-key"];const o=e.headers.upgrade;const i=+e.headers["sec-websocket-version"];if(e.method!=="GET"){const s="Invalid HTTP method";abortHandshakeOrEmitwsClientError(this,e,t,405,s);return}if(o===undefined||o.toLowerCase()!=="websocket"){const s="Invalid Upgrade header";abortHandshakeOrEmitwsClientError(this,e,t,400,s);return}if(r===undefined||!p.test(r)){const s="Missing or invalid Sec-WebSocket-Key header";abortHandshakeOrEmitwsClientError(this,e,t,400,s);return}if(i!==13&&i!==8){const s="Missing or invalid Sec-WebSocket-Version header";abortHandshakeOrEmitwsClientError(this,e,t,400,s,{"Sec-WebSocket-Version":"13, 8"});return}if(!this.shouldHandle(e)){abortHandshake(t,400);return}const f=e.headers["sec-websocket-protocol"];let d=new Set;if(f!==undefined){try{d=c.parse(f)}catch(s){const n="Invalid Sec-WebSocket-Protocol header";abortHandshakeOrEmitwsClientError(this,e,t,400,n);return}}const h=e.headers["sec-websocket-extensions"];const u={};if(this.options.perMessageDeflate&&h!==undefined){const s=new l({...this.options.perMessageDeflate,isServer:true,maxPayload:this.options.maxPayload});try{const e=a.parse(h);if(e[l.extensionName]){s.accept(e[l.extensionName]);u[l.extensionName]=s}}catch(s){const n="Invalid or unacceptable Sec-WebSocket-Extensions header";abortHandshakeOrEmitwsClientError(this,e,t,400,n);return}}if(this.options.verifyClient){const o={origin:e.headers[`${i===8?"sec-websocket-origin":"origin"}`],secure:!!(e.socket.authorized||e.socket.encrypted),req:e};if(this.options.verifyClient.length===2){this.options.verifyClient(o,((o,i,a,l)=>{if(!o){return abortHandshake(t,i||401,a,l)}this.completeUpgrade(u,r,d,e,t,s,n)}));return}if(!this.options.verifyClient(o))return abortHandshake(t,401)}this.completeUpgrade(u,r,d,e,t,s,n)}completeUpgrade(e,t,s,n,r,o,c){if(!r.readable||!r.writable)return r.destroy();if(r[u]){throw new Error("server.handleUpgrade() was called more than once with the same "+"socket, possibly due to a misconfiguration")}if(this._state>_)return abortHandshake(r,503);const f=i("sha1").update(t+h).digest("base64");const d=["HTTP/1.1 101 Switching Protocols","Upgrade: websocket","Connection: Upgrade",`Sec-WebSocket-Accept: ${f}`];const p=new this.options.WebSocket(null,undefined,this.options);if(s.size){const e=this.options.handleProtocols?this.options.handleProtocols(s,n):s.values().next().value;if(e){d.push(`Sec-WebSocket-Protocol: ${e}`);p._protocol=e}}if(e[l.extensionName]){const t=e[l.extensionName].params;const s=a.format({[l.extensionName]:[t]});d.push(`Sec-WebSocket-Extensions: ${s}`);p._extensions=e}this.emit("headers",d,n);r.write(d.concat("\r\n").join("\r\n"));r.removeListener("error",socketOnError);p.setSocket(r,o,{allowSynchronousEvents:this.options.allowSynchronousEvents,maxBufferedChunks:this.options.maxBufferedChunks,maxFragments:this.options.maxFragments,maxPayload:this.options.maxPayload,skipUTF8Validation:this.options.skipUTF8Validation});if(this.clients){this.clients.add(p);p.on("close",(()=>{this.clients.delete(p);if(this._shouldEmitClose&&!this.clients.size){process.nextTick(emitClose,this)}}))}c(p,n)}}e.exports=WebSocketServer;function addListeners(e,t){for(const s of Object.keys(t))e.on(s,t[s]);return function removeListeners(){for(const s of Object.keys(t)){e.removeListener(s,t[s])}}}function emitClose(e){e._state=g;e.emit("close")}function socketOnError(){this.destroy()}function abortHandshake(e,t,s,n){s=s||r.STATUS_CODES[t];n={Connection:"close","Content-Type":"text/html","Content-Length":Buffer.byteLength(s),...n};e.once("finish",e.destroy);e.end(`HTTP/1.1 ${t} ${r.STATUS_CODES[t]}\r\n`+Object.keys(n).map((e=>`${e}: ${n[e]}`)).join("\r\n")+"\r\n\r\n"+s)}function abortHandshakeOrEmitwsClientError(e,t,s,n,r,o){if(e.listenerCount("wsClientError")){const n=new Error(r);Error.captureStackTrace(n,abortHandshakeOrEmitwsClientError);e.emit("wsClientError",n,s,t)}else{abortHandshake(s,n,r,o)}}},101:(e,t,s)=>{"use strict";const n=s(434);const r=s(692);const o=s(611);const i=s(278);const a=s(756);const{randomBytes:l,createHash:c}=s(982);const{Duplex:f,Readable:d}=s(203);const{URL:h}=s(635);const u=s(556);const p=s(937);const _=s(361);const{isBlob:m}=s(651);const{BINARY_TYPES:g,CLOSE_TIMEOUT:b,EMPTY_BUFFER:y,GUID:S,kForOnEventAttribute:k,kListener:w,kStatusCode:E,kWebSocket:v,NOOP:x}=s(451);const{EventTarget:{addEventListener:C,removeEventListener:O}}=s(558);const{format:T,parse:P}=s(403);const{toBuffer:L}=s(647);const N=Symbol("kAborted");const B=[8,13];const W=["CONNECTING","OPEN","CLOSING","CLOSED"];const I=/^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/;class WebSocket extends n{constructor(e,t,s){super();this._binaryType=g[0];this._closeCode=1006;this._closeFrameReceived=false;this._closeFrameSent=false;this._closeMessage=y;this._closeTimer=null;this._errorEmitted=false;this._extensions={};this._paused=false;this._protocol="";this._readyState=WebSocket.CONNECTING;this._receiver=null;this._sender=null;this._socket=null;if(e!==null){this._bufferedAmount=0;this._isServer=false;this._redirects=0;if(t===undefined){t=[]}else if(!Array.isArray(t)){if(typeof t==="object"&&t!==null){s=t;t=[]}else{t=[t]}}initAsClient(this,e,t,s)}else{this._autoPong=s.autoPong;this._closeTimeout=s.closeTimeout;this._isServer=true}}get binaryType(){return this._binaryType}set binaryType(e){if(!g.includes(e))return;this._binaryType=e;if(this._receiver)this._receiver._binaryType=e}get bufferedAmount(){if(!this._socket)return this._bufferedAmount;return this._socket._writableState.length+this._sender._bufferedBytes}get extensions(){return Object.keys(this._extensions).join()}get isPaused(){return this._paused}get onclose(){return null}get onerror(){return null}get onopen(){return null}get onmessage(){return null}get protocol(){return this._protocol}get readyState(){return this._readyState}get url(){return this._url}setSocket(e,t,s){const n=new p({allowSynchronousEvents:s.allowSynchronousEvents,binaryType:this.binaryType,extensions:this._extensions,isServer:this._isServer,maxBufferedChunks:s.maxBufferedChunks,maxFragments:s.maxFragments,maxPayload:s.maxPayload,skipUTF8Validation:s.skipUTF8Validation});const r=new _(e,this._extensions,s.generateMask);this._receiver=n;this._sender=r;this._socket=e;n[v]=this;r[v]=this;e[v]=this;n.on("conclude",receiverOnConclude);n.on("drain",receiverOnDrain);n.on("error",receiverOnError);n.on("message",receiverOnMessage);n.on("ping",receiverOnPing);n.on("pong",receiverOnPong);r.onerror=senderOnError;if(e.setTimeout)e.setTimeout(0);if(e.setNoDelay)e.setNoDelay();if(t.length>0)e.unshift(t);e.on("close",socketOnClose);e.on("data",socketOnData);e.on("end",socketOnEnd);e.on("error",socketOnError);this._readyState=WebSocket.OPEN;this.emit("open")}emitClose(){if(!this._socket){this._readyState=WebSocket.CLOSED;this.emit("close",this._closeCode,this._closeMessage);return}if(this._extensions[u.extensionName]){this._extensions[u.extensionName].cleanup()}this._receiver.removeAllListeners();this._readyState=WebSocket.CLOSED;this.emit("close",this._closeCode,this._closeMessage)}close(e,t){if(this.readyState===WebSocket.CLOSED)return;if(this.readyState===WebSocket.CONNECTING){const e="WebSocket was closed before the connection was established";abortHandshake(this,this._req,e);return}if(this.readyState===WebSocket.CLOSING){if(this._closeFrameSent&&(this._closeFrameReceived||this._receiver._writableState.errorEmitted)){this._socket.end()}return}this._readyState=WebSocket.CLOSING;this._sender.close(e,t,!this._isServer,(e=>{if(e)return;this._closeFrameSent=true;if(this._closeFrameReceived||this._receiver._writableState.errorEmitted){this._socket.end()}}));setCloseTimer(this)}pause(){if(this.readyState===WebSocket.CONNECTING||this.readyState===WebSocket.CLOSED){return}this._paused=true;this._socket.pause()}ping(e,t,s){if(this.readyState===WebSocket.CONNECTING){throw new Error("WebSocket is not open: readyState 0 (CONNECTING)")}if(typeof e==="function"){s=e;e=t=undefined}else if(typeof t==="function"){s=t;t=undefined}if(typeof e==="number")e=e.toString();if(this.readyState!==WebSocket.OPEN){sendAfterClose(this,e,s);return}if(t===undefined)t=!this._isServer;this._sender.ping(e||y,t,s)}pong(e,t,s){if(this.readyState===WebSocket.CONNECTING){throw new Error("WebSocket is not open: readyState 0 (CONNECTING)")}if(typeof e==="function"){s=e;e=t=undefined}else if(typeof t==="function"){s=t;t=undefined}if(typeof e==="number")e=e.toString();if(this.readyState!==WebSocket.OPEN){sendAfterClose(this,e,s);return}if(t===undefined)t=!this._isServer;this._sender.pong(e||y,t,s)}resume(){if(this.readyState===WebSocket.CONNECTING||this.readyState===WebSocket.CLOSED){return}this._paused=false;if(!this._receiver._writableState.needDrain)this._socket.resume()}send(e,t,s){if(this.readyState===WebSocket.CONNECTING){throw new Error("WebSocket is not open: readyState 0 (CONNECTING)")}if(typeof t==="function"){s=t;t={}}if(typeof e==="number")e=e.toString();if(this.readyState!==WebSocket.OPEN){sendAfterClose(this,e,s);return}const n={binary:typeof e!=="string",mask:!this._isServer,compress:true,fin:true,...t};if(!this._extensions[u.extensionName]){n.compress=false}this._sender.send(e||y,n,s)}terminate(){if(this.readyState===WebSocket.CLOSED)return;if(this.readyState===WebSocket.CONNECTING){const e="WebSocket was closed before the connection was established";abortHandshake(this,this._req,e);return}if(this._socket){this._readyState=WebSocket.CLOSING;this._socket.destroy()}}}Object.defineProperty(WebSocket,"CONNECTING",{enumerable:true,value:W.indexOf("CONNECTING")});Object.defineProperty(WebSocket.prototype,"CONNECTING",{enumerable:true,value:W.indexOf("CONNECTING")});Object.defineProperty(WebSocket,"OPEN",{enumerable:true,value:W.indexOf("OPEN")});Object.defineProperty(WebSocket.prototype,"OPEN",{enumerable:true,value:W.indexOf("OPEN")});Object.defineProperty(WebSocket,"CLOSING",{enumerable:true,value:W.indexOf("CLOSING")});Object.defineProperty(WebSocket.prototype,"CLOSING",{enumerable:true,value:W.indexOf("CLOSING")});Object.defineProperty(WebSocket,"CLOSED",{enumerable:true,value:W.indexOf("CLOSED")});Object.defineProperty(WebSocket.prototype,"CLOSED",{enumerable:true,value:W.indexOf("CLOSED")});["binaryType","bufferedAmount","extensions","isPaused","protocol","readyState","url"].forEach((e=>{Object.defineProperty(WebSocket.prototype,e,{enumerable:true})}));["open","error","close","message"].forEach((e=>{Object.defineProperty(WebSocket.prototype,`on${e}`,{enumerable:true,get(){for(const t of this.listeners(e)){if(t[k])return t[w]}return null},set(t){for(const t of this.listeners(e)){if(t[k]){this.removeListener(e,t);break}}if(typeof t!=="function")return;this.addEventListener(e,t,{[k]:true})}})}));WebSocket.prototype.addEventListener=C;WebSocket.prototype.removeEventListener=O;e.exports=WebSocket;function initAsClient(e,t,s,n){const i={allowSynchronousEvents:true,autoPong:true,closeTimeout:b,protocolVersion:B[1],maxBufferedChunks:1024*1024,maxFragments:128*1024,maxPayload:100*1024*1024,skipUTF8Validation:false,perMessageDeflate:true,followRedirects:false,maxRedirects:10,...n,socketPath:undefined,hostname:undefined,protocol:undefined,timeout:undefined,method:"GET",host:undefined,path:undefined,port:undefined};e._autoPong=i.autoPong;e._closeTimeout=i.closeTimeout;if(!B.includes(i.protocolVersion)){throw new RangeError(`Unsupported protocol version: ${i.protocolVersion} `+`(supported versions: ${B.join(", ")})`)}let a;if(t instanceof h){a=t}else{try{a=new h(t)}catch{throw new SyntaxError(`Invalid URL: ${t}`)}}if(a.protocol==="http:"){a.protocol="ws:"}else if(a.protocol==="https:"){a.protocol="wss:"}e._url=a.href;const f=a.protocol==="wss:";const d=a.protocol==="ws+unix:";let p;if(a.protocol!=="ws:"&&!f&&!d){p='The URL\'s protocol must be one of "ws:", "wss:", '+'"http:", "https:", or "ws+unix:"'}else if(d&&!a.pathname){p="The URL's pathname is empty"}else if(a.hash){p="The URL contains a fragment identifier"}if(p){const t=new SyntaxError(p);if(e._redirects===0){throw t}else{emitErrorAndClose(e,t);return}}const _=f?443:80;const m=l(16).toString("base64");const g=f?r.request:o.request;const y=new Set;let k;i.createConnection=i.createConnection||(f?tlsConnect:netConnect);i.defaultPort=i.defaultPort||_;i.port=a.port||_;i.host=a.hostname.startsWith("[")?a.hostname.slice(1,-1):a.hostname;i.headers={...i.headers,"Sec-WebSocket-Version":i.protocolVersion,"Sec-WebSocket-Key":m,Connection:"Upgrade",Upgrade:"websocket"};i.path=a.pathname+a.search;i.timeout=i.handshakeTimeout;if(i.perMessageDeflate){k=new u({...i.perMessageDeflate,isServer:false,maxPayload:i.maxPayload});i.headers["Sec-WebSocket-Extensions"]=T({[u.extensionName]:k.offer()})}if(s.length){for(const e of s){if(typeof e!=="string"||!I.test(e)||y.has(e)){throw new SyntaxError("An invalid or duplicated subprotocol was specified")}y.add(e)}i.headers["Sec-WebSocket-Protocol"]=s.join(",")}if(i.origin){if(i.protocolVersion<13){i.headers["Sec-WebSocket-Origin"]=i.origin}else{i.headers.Origin=i.origin}}if(a.username||a.password){i.auth=`${a.username}:${a.password}`}if(d){const e=i.path.split(":");i.socketPath=e[0];i.path=e[1]}let w;if(i.followRedirects){if(e._redirects===0){e._originalIpc=d;e._originalSecure=f;e._originalHostOrSocketPath=d?i.socketPath:a.host;const t=n&&n.headers;n={...n,headers:{}};if(t){for(const[e,s]of Object.entries(t)){n.headers[e.toLowerCase()]=s}}}else if(e.listenerCount("redirect")===0){const t=d?e._originalIpc?i.socketPath===e._originalHostOrSocketPath:false:e._originalIpc?false:a.host===e._originalHostOrSocketPath;if(!t||e._originalSecure&&!f){delete i.headers.authorization;delete i.headers.cookie;if(!t)delete i.headers.host;i.auth=undefined}}if(i.auth&&!n.headers.authorization){n.headers.authorization="Basic "+Buffer.from(i.auth).toString("base64")}w=e._req=g(i);if(e._redirects){e.emit("redirect",e.url,w)}}else{w=e._req=g(i)}if(i.timeout){w.on("timeout",(()=>{abortHandshake(e,w,"Opening handshake has timed out")}))}w.on("error",(t=>{if(w===null||w[N])return;w=e._req=null;emitErrorAndClose(e,t)}));w.on("response",(r=>{const o=r.headers.location;const a=r.statusCode;if(o&&i.followRedirects&&a>=300&&a<400){if(++e._redirects>i.maxRedirects){abortHandshake(e,w,"Maximum redirects exceeded");return}w.abort();let r;try{r=new h(o,t)}catch(t){const s=new SyntaxError(`Invalid URL: ${o}`);emitErrorAndClose(e,s);return}initAsClient(e,r,s,n)}else if(!e.emit("unexpected-response",w,r)){abortHandshake(e,w,`Unexpected server response: ${r.statusCode}`)}}));w.on("upgrade",((t,s,n)=>{e.emit("upgrade",t);if(e.readyState!==WebSocket.CONNECTING)return;w=e._req=null;const r=t.headers.upgrade;if(r===undefined||r.toLowerCase()!=="websocket"){abortHandshake(e,s,"Invalid Upgrade header");return}const o=c("sha1").update(m+S).digest("base64");if(t.headers["sec-websocket-accept"]!==o){abortHandshake(e,s,"Invalid Sec-WebSocket-Accept header");return}const a=t.headers["sec-websocket-protocol"];let l;if(a!==undefined){if(!y.size){l="Server sent a subprotocol but none was requested"}else if(!y.has(a)){l="Server sent an invalid subprotocol"}}else if(y.size){l="Server sent no subprotocol"}if(l){abortHandshake(e,s,l);return}if(a)e._protocol=a;const f=t.headers["sec-websocket-extensions"];if(f!==undefined){if(!k){const t="Server sent a Sec-WebSocket-Extensions header but no extension "+"was requested";abortHandshake(e,s,t);return}let t;try{t=P(f)}catch(t){const n="Invalid Sec-WebSocket-Extensions header";abortHandshake(e,s,n);return}const n=Object.keys(t);if(n.length!==1||n[0]!==u.extensionName){const t="Server indicated an extension that was not requested";abortHandshake(e,s,t);return}try{k.accept(t[u.extensionName])}catch(t){const n="Invalid Sec-WebSocket-Extensions header";abortHandshake(e,s,n);return}e._extensions[u.extensionName]=k}e.setSocket(s,n,{allowSynchronousEvents:i.allowSynchronousEvents,generateMask:i.generateMask,maxBufferedChunks:i.maxBufferedChunks,maxFragments:i.maxFragments,maxPayload:i.maxPayload,skipUTF8Validation:i.skipUTF8Validation})}));if(i.finishRequest){i.finishRequest(w,e)}else{w.end()}}function emitErrorAndClose(e,t){e._readyState=WebSocket.CLOSING;e._errorEmitted=true;e.emit("error",t);e.emitClose()}function netConnect(e){e.path=e.socketPath;return i.connect(e)}function tlsConnect(e){e.path=undefined;if(!e.servername&&e.servername!==""){e.servername=i.isIP(e.host)?"":e.host}return a.connect(e)}function abortHandshake(e,t,s){e._readyState=WebSocket.CLOSING;const n=new Error(s);Error.captureStackTrace(n,abortHandshake);if(t.setHeader){t[N]=true;t.abort();if(t.socket&&!t.socket.destroyed){t.socket.destroy()}process.nextTick(emitErrorAndClose,e,n)}else{t.destroy(n);t.once("error",e.emit.bind(e,"error"));t.once("close",e.emitClose.bind(e))}}function sendAfterClose(e,t,s){if(t){const s=m(t)?t.size:L(t).length;if(e._socket)e._sender._bufferedBytes+=s;else e._bufferedAmount+=s}if(s){const t=new Error(`WebSocket is not open: readyState ${e.readyState} `+`(${W[e.readyState]})`);process.nextTick(s,t)}}function receiverOnConclude(e,t){const s=this[v];s._closeFrameReceived=true;s._closeMessage=t;s._closeCode=e;if(s._socket[v]===undefined)return;s._socket.removeListener("data",socketOnData);process.nextTick(resume,s._socket);if(e===1005)s.close();else s.close(e,t)}function receiverOnDrain(){const e=this[v];if(!e.isPaused)e._socket.resume()}function receiverOnError(e){const t=this[v];if(t._socket[v]!==undefined){t._socket.removeListener("data",socketOnData);process.nextTick(resume,t._socket);t.close(e[E])}if(!t._errorEmitted){t._errorEmitted=true;t.emit("error",e)}}function receiverOnFinish(){this[v].emitClose()}function receiverOnMessage(e,t){this[v].emit("message",e,t)}function receiverOnPing(e){const t=this[v];if(t._autoPong)t.pong(e,!this._isServer,x);t.emit("ping",e)}function receiverOnPong(e){this[v].emit("pong",e)}function resume(e){e.resume()}function senderOnError(e){const t=this[v];if(t.readyState===WebSocket.CLOSED)return;if(t.readyState===WebSocket.OPEN){t._readyState=WebSocket.CLOSING;setCloseTimer(t)}this._socket.end();if(!t._errorEmitted){t._errorEmitted=true;t.emit("error",e)}}function setCloseTimer(e){e._closeTimer=setTimeout(e._socket.destroy.bind(e._socket),e._closeTimeout)}function socketOnClose(){const e=this[v];this.removeListener("close",socketOnClose);this.removeListener("data",socketOnData);this.removeListener("end",socketOnEnd);e._readyState=WebSocket.CLOSING;if(!this._readableState.endEmitted&&!e._closeFrameReceived&&!e._receiver._writableState.errorEmitted&&this._readableState.length!==0){const t=this.read(this._readableState.length);e._receiver.write(t)}e._receiver.end();this[v]=undefined;clearTimeout(e._closeTimer);if(e._receiver._writableState.finished||e._receiver._writableState.errorEmitted){e.emitClose()}else{e._receiver.on("error",receiverOnFinish);e._receiver.on("finish",receiverOnFinish)}}function socketOnData(e){if(!this[v]._receiver.write(e)){this.pause()}}function socketOnEnd(){const e=this[v];e._readyState=WebSocket.CLOSING;e._receiver.end();this.end()}function socketOnError(){const e=this[v];this.removeListener("error",socketOnError);this.on("error",x);if(e){e._readyState=WebSocket.CLOSING;this.destroy()}}},75:function(e,t,s){"use strict";var n=this&&this.__createBinding||(Object.create?function(e,t,s,n){if(n===undefined)n=s;var r=Object.getOwnPropertyDescriptor(t,s);if(!r||("get"in r?!t.__esModule:r.writable||r.configurable)){r={enumerable:true,get:function(){return t[s]}}}Object.defineProperty(e,n,r)}:function(e,t,s,n){if(n===undefined)n=s;e[n]=t[s]});var r=this&&this.__setModuleDefault||(Object.create?function(e,t){Object.defineProperty(e,"default",{enumerable:true,value:t})}:function(e,t){e["default"]=t});var o=this&&this.__importStar||function(){var ownKeys=function(e){ownKeys=Object.getOwnPropertyNames||function(e){var t=[];for(var s in e)if(Object.prototype.hasOwnProperty.call(e,s))t[t.length]=s;return t};return ownKeys(e)};return function(e){if(e&&e.__esModule)return e;var t={};if(e!=null)for(var s=ownKeys(e),o=0;o<s.length;o++)if(s[o]!=="default")n(t,e,s[o]);r(t,e);return t}}();var i=this&&this.__importDefault||function(e){return e&&e.__esModule?e:{default:e}};Object.defineProperty(t,"__esModule",{value:true});t.activate=activate;t.deactivate=deactivate;const a=o(s(504));const l=o(s(928));const c=o(s(896));const f=o(s(857));const d=s(317);const h=i(s(822));let u=null;let p=null;let _=null;let m=null;let g=null;let b=null;let y=false;const S=new Map;let k=null;let w=false;let E=0;let v=false;let x=false;function activate(e){console.log("TokenWall VS Code companion extension is now active.");try{const e="/Users/shashankkumar/Documents/tokenWall/debug_extensions.json";const t=a.extensions.all.map((e=>({id:e.id,displayName:e.packageJSON?.displayName||"",name:e.packageJSON?.name||""})));c.writeFileSync(e,JSON.stringify(t,null,2),"utf8")}catch(e){console.error("Failed to dump diagnostics",e)}k=a.window.createOutputChannel("TokenWall Daemon");e.subscriptions.push(k);k.appendLine("TokenWall companion extension activated.");(0,d.exec)("node --version",(e=>{if(e){k?.appendLine("Warning: Node.js was not detected in the environment path.");a.window.showWarningMessage("TokenWall requires Node.js to run the spend protection daemon. Please ensure Node.js is installed on your system.")}}));_=a.window.createStatusBarItem(a.StatusBarAlignment.Right,100);_.command="tokenwall.showStatus";e.subscriptions.push(_);updateStatusBarText("Initializing...","yellow");_.show();updateTerminalEnvironment(e).catch(console.error);startDaemonManager(e);connectControlPlane(e);e.subscriptions.push(a.commands.registerCommand("tokenwall.showStatus",(async()=>{await showStatusSummary()})));e.subscriptions.push(a.commands.registerCommand("tokenwall.restartDaemon",(()=>{restartDaemon(e)})));e.subscriptions.push(a.workspace.onDidChangeConfiguration((t=>{if(t.affectsConfiguration("tokenwall")){updateTerminalEnvironment(e).catch(console.error);syncSettingsToConfigFile()}})));syncSettingsToConfigFile();autoConfigureAIExtensions().catch(console.error)}function deactivate(){stopDaemon();if(m)clearTimeout(m);if(g)clearInterval(g)}async function getOrCreateWorkspaceProject(){const e=a.workspace.workspaceFolders;if(!e||e.length===0)return null;const t=e[0];const s=t.name;const n=t.uri.fsPath;try{const e=await fetch("http://127.0.0.1:1984/api/admin/project/get-or-create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:s,path:n})});if(e.ok){const t=await e.json();return t.id}}catch(e){console.error("Failed to register project folder with gateway",e)}return null}async function updateTerminalEnvironment(e){const t=e.environmentVariableCollection;const s=a.workspace.getConfiguration("tokenwall");const n=s.get("enableAutoInterception",true);if(n){t.replace("ANTHROPIC_BASE_URL","http://127.0.0.1:1984");t.replace("OPENAI_BASE_URL","http://127.0.0.1:1984/v1");t.replace("GEMINI_BASE_URL","http://127.0.0.1:1984");try{const e=await getOrCreateWorkspaceProject();if(e){t.replace("TOKENWALL_PROJECT_ID",e)}}catch{}}else{t.clear()}}function startDaemonManager(e){checkDaemonHealth().then((t=>{if(!t){launchDaemon(e)}}));g=setInterval((()=>{fetchStatsAndUpdateUI()}),1e4)}async function checkDaemonHealth(){try{const e=new AbortController;const t=setTimeout((()=>e.abort()),1e3);const s=await fetch("http://127.0.0.1:1984/api/admin/budgets",{signal:e.signal});clearTimeout(t);return s.ok}catch{return false}}function launchDaemon(e){if(u||v)return;v=true;x=false;const t=l.resolve(e.extensionPath,"../gateway/dist/index.js");let n="";if(c.existsSync(t)){n=t}else{const t=l.resolve(e.extensionPath,"node_modules/@tokenwall/gateway/dist/index.js");if(c.existsSync(t)){n=t}else{const e=a.workspace.workspaceFolders;if(e){for(const t of e){const e=l.resolve(t.uri.fsPath,"apps/gateway/dist/index.js");if(c.existsSync(e)){n=e;break}}}}}const r=a.workspace.getConfiguration("tokenwall");const o=r.get("customDaemonCommand");k?.appendLine(`[Daemon Manager] Preparing to start background daemon...`);const i=[];if(o){i.push({name:"customCommand",cmd:o,args:[],useShell:true})}if(n){i.push({name:"localGateway",cmd:"node",args:[n]})}else{if(process.platform==="win32"){const e=process.env.APPDATA;if(e){const t=l.join(e,"npm","tokenwall.cmd");const n=s(896);if(n.existsSync(t)){i.push({name:"globalTokenWall",cmd:t,args:["start"]})}}i.push({name:"globalTokenWall",cmd:"tokenwall.cmd",args:["start"]})}else{i.push({name:"globalTokenWall",cmd:"tokenwall",args:["start"]})}const e=process.platform==="win32"?"npx.cmd":"npx";i.push({name:"npxFallback",cmd:e,args:["--yes","tokenwall","start"]})}const f={...process.env,PORT:"1984",TOKENWALL_HEADLESS:"false"};if(process.platform==="win32"&&process.env.APPDATA){const e=l.join(process.env.APPDATA,"npm");const t=Object.keys(process.env).find((e=>e.toUpperCase()==="PATH"))||"Path";const s=f[t]||"";if(!s.includes(e)){f[t]=`${e};${s}`;k?.appendLine(`[Daemon Manager] Added npm global bin to PATH: ${e}`)}}function attemptSpawn(e){if(e>=i.length){k?.appendLine("[Daemon Manager] All spawn strategies failed.");v=false;w=false;updateStatusBarText("Offline","red");E++;handleCrash();return}const t=i[e];k?.appendLine(`[Daemon Manager] Attempting strategy "${t.name}": ${t.cmd} ${t.args.join(" ")}`);if(t.name==="npxFallback"){w=true;updateStatusBarText("Downloading Daemon...","yellow")}let s=false;const n=Date.now();const r=(0,d.spawn)(t.cmd,t.args,{stdio:["ignore","pipe","pipe"],shell:t.useShell||process.platform==="win32",env:f});u=r;r.stdout?.on("data",(e=>{k?.appendLine(`[Daemon STDOUT] ${e.toString().trim()}`)}));r.stderr?.on("data",(e=>{k?.appendLine(`[Daemon STDERR] ${e.toString().trim()}`)}));r.on("error",(n=>{k?.appendLine(`[Daemon ERROR] Strategy "${t.name}" failed: ${n.message}`);if(s)return;s=true;u=null;attemptSpawn(e+1)}));r.on("exit",(r=>{k?.appendLine(`[Daemon EXIT] Strategy "${t.name}" exited with code ${r}`);if(s)return;s=true;u=null;w=false;updateStatusBarText("Offline","red");if(x){k?.appendLine("[Daemon Manager] Daemon was stopped intentionally. Auto-recovery skipped.");x=false;v=false;return}const o=Date.now()-n;if(r!==0&&o<3e3){k?.appendLine(`[Daemon Manager] Strategy "${t.name}" failed quickly. Trying next strategy...`);attemptSpawn(e+1)}else{if(o<5e3){E++}else{E=0}handleCrash()}}))}function handleCrash(){v=false;if(E>=3){k?.appendLine(`[Daemon Manager] Daemon crashed ${E} times consecutively. Disabling auto-recovery.`);a.window.showErrorMessage("TokenWall spend protection daemon failed to start. Please verify your Node/npm environment. You can try installing the package globally, or checking the logs.","Retry","Show Logs","Copy Install Command").then((t=>{if(t==="Retry"){E=0;launchDaemon(e)}else if(t==="Show Logs"){k?.show()}else if(t==="Copy Install Command"){a.env.clipboard.writeText("npm install -g tokenwall");a.window.showInformationMessage('Copied "npm install -g tokenwall" to clipboard.')}}));return}const t=[5e3,15e3,3e4];const s=t[Math.min(E,t.length-1)];k?.appendLine(`[Daemon Manager] Auto-recovery: waiting ${s/1e3}s before checking/relaunching...`);setTimeout((()=>{checkDaemonHealth().then((t=>{if(!t)launchDaemon(e)}))}),s)}attemptSpawn(0)}function restartDaemon(e){stopDaemon();a.window.showInformationMessage("Restarting TokenWall gateway daemon...");E=0;v=false;setTimeout((()=>launchDaemon(e)),1500)}function stopDaemon(){if(u){x=true;u.kill();u=null}}function connectControlPlane(e){if(p){try{p.close()}catch{}}p=new h.default("ws://127.0.0.1:1984/ws/control");p.on("open",(()=>{y=true;w=false;E=0;v=false;console.log("WS Connection to TokenWall Control Plane established.");updateStatusBarText("Active","green");fetchStatsAndUpdateUI();if(b)clearInterval(b);b=setInterval((()=>{if(p&&p.readyState===h.default.OPEN){p.ping()}}),15e3)}));p.on("message",(e=>{try{const t=JSON.parse(e.toString());if(t.type==="approval_pending"){const e=t.payload;if(!S.has(e.requestId)){handlePendingApproval(e)}}else if(t.type==="approval_cleared"){const{requestId:e}=t.payload;const s=S.get(e);if(s){s.hide()}}else if(t.type==="notification"){const{message:e,style:s}=t.payload;if(s==="error"){a.window.showErrorMessage(e)}else if(s==="warning"){a.window.showWarningMessage(e)}else{a.window.showInformationMessage(e)}}}catch(e){console.error("Invalid WS message",e)}}));p.on("close",(()=>{y=false;if(b)clearInterval(b);updateStatusBarText("Reconnecting...","yellow");if(m)clearTimeout(m);m=setTimeout((()=>{connectControlPlane(e)}),3e3)}));p.on("error",(()=>{y=false}))}let C=false;const O=[];async function processQueue(){if(C||O.length===0)return;C=true;try{const e=O.shift();await showApprovalUI(e)}finally{C=false;if(O.length>0){setTimeout(processQueue,100)}}}function showApprovalUI(e){return new Promise((t=>{const s=`$${e.estimatedCost.toFixed(4)}`;const n=a.window.createQuickPick();n.title=`🛡️ TokenWall Spend Intercept — ${e.model}`;n.placeholder=`Estimated request cost is ${s}. Choose an action below:`;const r=[];r.push({label:`$(zap) Optimize Prompt & Proceed`,description:"Strip comments, minify JSON, and align cache prefixes losslessly",detail:"Bypasses waste to decrease latency and reduce token cost"});r.push({label:`$(check) Approve As-Is`,description:"Proceed with this request as-is without optimizing context",detail:`Proceed at full estimated cost of ${s}`});if(e.routingAlternatives&&e.routingAlternatives.length>0){r.push({label:`$(git-compare) Switch Model`,description:"Switch to a cost-efficient model alternative",detail:`Alternatives: ${e.routingAlternatives.map((e=>`${e.model} (${e.savingsPercentage}% saved)`)).join(", ")}`})}r.push({label:`$(x) Block Request`,description:"Block this request from hitting the provider API",detail:"Terminates this call to preserve remaining budget"});if(e.warnings&&e.warnings.length>0){r.push({label:"⚠️ Spend Warnings & Inefficiencies Detected",kind:a.QuickPickItemKind.Separator});for(const t of e.warnings){const e=typeof t==="string"?t:t.description||JSON.stringify(t);r.push({label:`  ${e}`,alwaysShow:true})}}n.items=r;n.ignoreFocusOut=true;S.set(e.requestId,n);let o=false;n.onDidAccept((async()=>{const s=n.selectedItems[0];if(!s||s.kind===a.QuickPickItemKind.Separator||s.label.startsWith("  "))return;o=true;n.hide();let r="cancel";let i=undefined;if(s.label.includes("Approve As-Is")){r="approve"}else if(s.label.includes("Optimize Prompt")){r="optimize"}else if(s.label.includes("Switch Model")&&e.routingAlternatives){const t=e.routingAlternatives.map((e=>({label:e.model,description:`Cost: $${e.estimatedCost.toFixed(4)} | Savings: ${e.savingsPercentage}%`,detail:`Quality Level: ${e.qualityLevel}`,modelName:e.model})));const s=await a.window.showQuickPick(t,{title:"Select Cost-Efficient Model Alternative",placeHolder:`Switch from ${e.model}`});if(s){r="switch_model";i=s.modelName}else{r="cancel"}}if(p&&p.readyState===h.default.OPEN){p.send(JSON.stringify({type:"approval_resolved",payload:{requestId:e.requestId,action:r,chosenModel:i}}))}S.delete(e.requestId);n.dispose();t()}));n.onDidHide((()=>{if(!o){if(p&&p.readyState===h.default.OPEN){p.send(JSON.stringify({type:"approval_resolved",payload:{requestId:e.requestId,action:"cancel"}}))}S.delete(e.requestId);n.dispose();t()}}));n.show()}))}async function handlePendingApproval(e){O.push(e);processQueue()}async function fetchStatsAndUpdateUI(){if(!y)return;try{const e=await fetch("http://127.0.0.1:1984/api/admin/summary");if(e.ok){const t=await e.json();const s=t.preventedSpend+t.optimizedSavings;const n=`Today: $${t.dailySpend.toFixed(2)} • Saved: $${s.toFixed(2)}`;const r=t.dailySpend/(t.dailyLimit||10);let o="green";if(r>=.9){o="red"}else if(r>=.7){o="yellow"}updateStatusBarText(n,o)}}catch{updateStatusBarText("Offline","red")}}function updateStatusBarText(e,t){if(!_)return;if(w&&(e==="Reconnecting..."||e==="Offline")){_.text=`$(cloud-download) Downloading Daemon...`;_.color=new a.ThemeColor("statusBarItem.warningForeground");return}_.text=`$(shield) ${e}`;if(t==="red"){_.color=new a.ThemeColor("statusBarItem.errorForeground")}else if(t==="yellow"){_.color=new a.ThemeColor("statusBarItem.warningForeground")}else{_.color=undefined}}async function showStatusSummary(){try{const e=await fetch("http://127.0.0.1:1984/api/admin/summary");if(!e.ok){a.window.showErrorMessage("TokenWall Gateway daemon API is unreachable.");return}const t=await e.json();const s=t.preventedSpend+t.optimizedSavings;const n=[{label:`$(graph) Open Observability Dashboard`,detail:"View detailed analytics and forensic logs",action:"open_dashboard"},{label:`$(settings-gear) Configure TokenWall Limits`,detail:"Set daily/monthly budgets and optimization preferences",action:"configure_limits"},{label:"--- Spend Summary ---",kind:a.QuickPickItemKind.Separator}];const r=[...n,{label:`Today's Spend: $${t.dailySpend.toFixed(4)} / $${t.dailyLimit.toFixed(2)}`,detail:`Daily budget consumption: ${Math.round(t.dailySpend/(t.dailyLimit||10)*100)}%`},{label:`Total Prevented Cost: $${t.preventedSpend.toFixed(4)}`,detail:"Savings from blocked runaway loops or budget blocks"},{label:`Total Optimized Savings: $${t.optimizedSavings.toFixed(4)}`,detail:`Saved ${t.savedTokens.toLocaleString()} tokens via prompt compressions / switches`},{label:"--- Workspace Attribution ---",kind:a.QuickPickItemKind.Separator},...t.workspaces.map((e=>({label:`  ${e.project_name}`,detail:`Accumulated Spend: $${e.total_spend.toFixed(4)}`}))),{label:"--- Provider Breakdown ---",kind:a.QuickPickItemKind.Separator},...t.providers.map((e=>({label:`  ${e.provider.toUpperCase()}`,detail:`Spend: $${e.total_spend.toFixed(4)} (${e.request_count} requests)`}))),{label:"--- Model Breakdown ---",kind:a.QuickPickItemKind.Separator},...t.models.map((e=>({label:`  ${e.model}`,detail:`Spend: $${e.total_spend.toFixed(4)} (${e.request_count} requests)`})))];const o=await a.window.showQuickPick(r,{title:`TokenWall Summary • Total Savings: $${s.toFixed(2)}`,placeHolder:"Select an action or view summary"});if(o&&o.action){if(o.action==="open_dashboard"){a.env.openExternal(a.Uri.parse("http://127.0.0.1:1984/dashboard/"))}else if(o.action==="configure_limits"){a.commands.executeCommand("workbench.action.openSettings","tokenwall")}}}catch(e){a.window.showErrorMessage(`Failed to fetch stats: ${e.message}`)}}function syncSettingsToConfigFile(){try{const e=l.join(f.homedir(),".tokenwall");const t=l.join(e,"config.json");let s={};if(c.existsSync(t)){try{s=JSON.parse(c.readFileSync(t,"utf8"))}catch{}}const n=a.workspace.getConfiguration("tokenwall");s.dailyLimit=n.get("dailyLimit",10);s.monthlyLimit=n.get("monthlyLimit",100);s.sessionLimit=n.get("sessionLimit",2);s.hardLimitsEnabled=n.get("hardLimitsEnabled",true);s.autoApproveLimit=n.get("autoApproveLimit",.1);s.autoDenyLimit=n.get("autoDenyLimit",5);s.autoOptimize=n.get("autoOptimize",false);if(!c.existsSync(e)){c.mkdirSync(e,{recursive:true})}c.writeFileSync(t,JSON.stringify(s,null,2),"utf8");console.log("Synchronized VS Code settings with ~/.tokenwall/config.json")}catch(e){console.error("Error synchronizing TokenWall configuration settings",e)}}async function autoConfigureAIExtensions(){const e=a.extensions.all;const t=e.find((e=>e.id==="saoudrizwan.claude-dev"));if(t){const e=a.workspace.getConfiguration("cline");const t=e.get("apiProvider");if(t!=="custom"){const t=await a.window.showInformationMessage("TokenWall detected the Cline extension. Enable automatic spend protection and loop blocking for Cline?","Enable Protection","No");if(t==="Enable Protection"){await e.update("apiProvider","custom",a.ConfigurationTarget.Global);await e.update("apiEndpoint","http://127.0.0.1:1984/v1",a.ConfigurationTarget.Global);a.window.showInformationMessage("TokenWall spend protection enabled for Cline!")}}}const s=e.find((e=>e.id==="RooVeterinaryInc.roo-cline"));if(s){const e=a.workspace.getConfiguration("roo-cline");const t=e.get("apiProvider");if(t!=="custom"){const t=await a.window.showInformationMessage("TokenWall detected the Roo Cline extension. Enable automatic spend protection and loop blocking for Roo Cline?","Enable Protection","No");if(t==="Enable Protection"){await e.update("apiProvider","custom",a.ConfigurationTarget.Global);await e.update("apiEndpoint","http://127.0.0.1:1984/v1",a.ConfigurationTarget.Global);a.window.showInformationMessage("TokenWall spend protection enabled for Roo Cline!")}}}const n=e.find((e=>e.id.toLowerCase()==="anthropic.claude-code"||e.id.toLowerCase().includes("claude-code")));if(n){const e=l.join(f.homedir(),".claude","settings.json");let t=false;let s={};if(c.existsSync(e)){try{s=JSON.parse(c.readFileSync(e,"utf8"));if(s.env&&s.env.ANTHROPIC_BASE_URL){t=true}}catch(e){console.error("Failed to parse ~/.claude/settings.json",e)}}if(!t){const t=await a.window.showInformationMessage("TokenWall detected the Claude Code extension. Enable automatic spend protection and loop blocking for Claude Code?","Enable Protection","No");if(t==="Enable Protection"){if(!s.env){s.env={}}s.env.ANTHROPIC_BASE_URL="http://127.0.0.1:1984";try{const t=l.dirname(e);if(!c.existsSync(t)){c.mkdirSync(t,{recursive:true})}c.writeFileSync(e,JSON.stringify(s,null,2),"utf8");a.window.showInformationMessage("TokenWall spend protection enabled for Claude Code!")}catch(e){console.error("Failed to update ~/.claude/settings.json",e);a.window.showErrorMessage("Failed to configure Claude Code. Please manually add ANTHROPIC_BASE_URL to your ~/.claude/settings.json.")}}}}}},140:module=>{module.exports=eval("require")("bufferutil")},285:module=>{module.exports=eval("require")("utf-8-validate")},504:module=>{module.exports=eval("require")("vscode")},181:e=>{"use strict";e.exports=require("buffer")},317:e=>{"use strict";e.exports=require("child_process")},982:e=>{"use strict";e.exports=require("crypto")},434:e=>{"use strict";e.exports=require("events")},896:e=>{"use strict";e.exports=require("fs")},611:e=>{"use strict";e.exports=require("http")},692:e=>{"use strict";e.exports=require("https")},278:e=>{"use strict";e.exports=require("net")},857:e=>{"use strict";e.exports=require("os")},928:e=>{"use strict";e.exports=require("path")},203:e=>{"use strict";e.exports=require("stream")},756:e=>{"use strict";e.exports=require("tls")},635:e=>{"use strict";e.exports=require("url")},23:e=>{"use strict";e.exports=require("util")},106:e=>{"use strict";e.exports=require("zlib")}};var __webpack_module_cache__={};function __nccwpck_require__(e){var t=__webpack_module_cache__[e];if(t!==undefined){return t.exports}var s=__webpack_module_cache__[e]={exports:{}};var n=true;try{__webpack_modules__[e].call(s.exports,s,s.exports,__nccwpck_require__);n=false}finally{if(n)delete __webpack_module_cache__[e]}return s.exports}if(typeof __nccwpck_require__!=="undefined")__nccwpck_require__.ab=__dirname+"/";var __webpack_exports__=__nccwpck_require__(75);module.exports=__webpack_exports__})();
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.activate = activate;
+exports.deactivate = deactivate;
+const vscode = __importStar(require("vscode"));
+const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
+const child_process_1 = require("child_process");
+const ws_1 = __importDefault(require("ws"));
+let daemonProcess = null;
+let wsClient = null;
+let statusBarItem = null;
+let reconnectTimer = null;
+let pollTimer = null;
+let pingInterval = null;
+let isConnected = false;
+const activeQuickPicks = new Map();
+let daemonOutputChannel = null;
+let isDownloadingDaemon = false;
+let daemonCrashCount = 0;
+let isSpawning = false;
+let intentionalStop = false;
+function activate(context) {
+    console.log('TokenWall VS Code companion extension is now active.');
+    // Diagnostic dump of active extensions
+    try {
+        const dumpPath = '/Users/shashankkumar/Documents/tokenWall/debug_extensions.json';
+        const extInfo = vscode.extensions.all.map(e => ({
+            id: e.id,
+            displayName: e.packageJSON?.displayName || '',
+            name: e.packageJSON?.name || ''
+        }));
+        fs.writeFileSync(dumpPath, JSON.stringify(extInfo, null, 2), 'utf8');
+    }
+    catch (e) {
+        console.error('Failed to dump diagnostics', e);
+    }
+    // 1. Initialize Status Bar
+    daemonOutputChannel = vscode.window.createOutputChannel('TokenWall Daemon');
+    context.subscriptions.push(daemonOutputChannel);
+    daemonOutputChannel.appendLine('TokenWall companion extension activated.');
+    // Check Node availability
+    (0, child_process_1.exec)('node --version', (err) => {
+        if (err) {
+            daemonOutputChannel?.appendLine('Warning: Node.js was not detected in the environment path.');
+            vscode.window.showWarningMessage('TokenWall requires Node.js to run the spend protection daemon. Please ensure Node.js is installed on your system.');
+        }
+    });
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem.command = 'tokenwall.showStatus';
+    context.subscriptions.push(statusBarItem);
+    updateStatusBarText('Initializing...', 'yellow');
+    statusBarItem.show();
+    // 2. Setup environment interception
+    updateTerminalEnvironment(context).catch(console.error);
+    // 3. Start Daemon Manager & Control Plane Listener
+    startDaemonManager(context);
+    connectControlPlane(context);
+    // 4. Register commands
+    context.subscriptions.push(vscode.commands.registerCommand('tokenwall.showStatus', async () => {
+        await showStatusSummary();
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('tokenwall.restartDaemon', () => {
+        restartDaemon(context);
+    }));
+    // 5. Watch settings configuration changes
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('tokenwall')) {
+            updateTerminalEnvironment(context).catch(console.error);
+            syncSettingsToConfigFile();
+        }
+    }));
+    // Perform initial config sync
+    syncSettingsToConfigFile();
+    // Auto-detect and configure other popular AI extensions
+    autoConfigureAIExtensions().catch(console.error);
+}
+function deactivate() {
+    stopDaemon();
+    if (reconnectTimer)
+        clearTimeout(reconnectTimer);
+    if (pollTimer)
+        clearInterval(pollTimer);
+}
+// -------------------------------------------------------------
+// Terminal Environment Injection
+// -------------------------------------------------------------
+async function getOrCreateWorkspaceProject() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0)
+        return null;
+    const folder = folders[0];
+    const name = folder.name;
+    const dirPath = folder.uri.fsPath;
+    try {
+        const res = await fetch('http://127.0.0.1:1984/api/admin/project/get-or-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, path: dirPath })
+        });
+        if (res.ok) {
+            const proj = await res.json();
+            return proj.id;
+        }
+    }
+    catch (e) {
+        console.error('Failed to register project folder with gateway', e);
+    }
+    return null;
+}
+async function updateTerminalEnvironment(context) {
+    const env = context.environmentVariableCollection;
+    const config = vscode.workspace.getConfiguration('tokenwall');
+    const enableInterception = config.get('enableAutoInterception', true);
+    if (enableInterception) {
+        env.replace('ANTHROPIC_BASE_URL', 'http://127.0.0.1:1984');
+        env.replace('OPENAI_BASE_URL', 'http://127.0.0.1:1984/v1');
+        env.replace('GEMINI_BASE_URL', 'http://127.0.0.1:1984');
+        // Auto-detect project id from active workspace folder
+        try {
+            const projectId = await getOrCreateWorkspaceProject();
+            if (projectId) {
+                env.replace('TOKENWALL_PROJECT_ID', projectId);
+            }
+        }
+        catch { }
+    }
+    else {
+        env.clear();
+    }
+}
+// -------------------------------------------------------------
+// Local Daemon Manager
+// -------------------------------------------------------------
+function startDaemonManager(context) {
+    checkDaemonHealth().then((alive) => {
+        if (!alive) {
+            launchDaemon(context);
+        }
+    });
+    // Start polling gateway stats
+    pollTimer = setInterval(() => {
+        fetchStatsAndUpdateUI();
+    }, 10000);
+}
+async function checkDaemonHealth() {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1000);
+        const res = await fetch('http://127.0.0.1:1984/api/admin/budgets', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        return res.ok;
+    }
+    catch {
+        return false;
+    }
+}
+function launchDaemon(context) {
+    if (daemonProcess || isSpawning)
+        return;
+    isSpawning = true;
+    intentionalStop = false;
+    const localGateway = path.resolve(context.extensionPath, '../gateway/dist/index.js');
+    let gatewayPath = '';
+    if (fs.existsSync(localGateway)) {
+        gatewayPath = localGateway;
+    }
+    else {
+        // node_modules resolution
+        const nodeModulesPath = path.resolve(context.extensionPath, 'node_modules/@tokenwall/gateway/dist/index.js');
+        if (fs.existsSync(nodeModulesPath)) {
+            gatewayPath = nodeModulesPath;
+        }
+        else {
+            // Dev environment fallback
+            const folders = vscode.workspace.workspaceFolders;
+            if (folders) {
+                for (const f of folders) {
+                    const devPath = path.resolve(f.uri.fsPath, 'apps/gateway/dist/index.js');
+                    if (fs.existsSync(devPath)) {
+                        gatewayPath = devPath;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    const config = vscode.workspace.getConfiguration('tokenwall');
+    const customCommand = config.get('customDaemonCommand');
+    daemonOutputChannel?.appendLine(`[Daemon Manager] Preparing to start background daemon...`);
+    // Build the list of strategies to try in order
+    const strategies = [];
+    if (customCommand) {
+        strategies.push({ name: 'customCommand', cmd: customCommand, args: [], useShell: true });
+    }
+    if (gatewayPath) {
+        strategies.push({ name: 'localGateway', cmd: 'node', args: [gatewayPath] });
+    }
+    else {
+        if (process.platform === 'win32') {
+            // On Windows, VS Code's extension host may not have npm's global bin
+            // in its PATH. Try the explicit %APPDATA%\npm path first.
+            const appData = process.env.APPDATA;
+            if (appData) {
+                const explicitCmd = path.join(appData, 'npm', 'tokenwall.cmd');
+                const fs = require('fs');
+                if (fs.existsSync(explicitCmd)) {
+                    strategies.push({ name: 'globalTokenWall', cmd: explicitCmd, args: ['start'] });
+                }
+            }
+            // Also try PATH-based resolution
+            strategies.push({ name: 'globalTokenWall', cmd: 'tokenwall.cmd', args: ['start'] });
+        }
+        else {
+            strategies.push({ name: 'globalTokenWall', cmd: 'tokenwall', args: ['start'] });
+        }
+        // Fall back to npx
+        const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+        strategies.push({ name: 'npxFallback', cmd: npxCmd, args: ['--yes', 'tokenwall', 'start'] });
+    }
+    // On Windows, build an enhanced PATH that includes npm's global bin directory
+    const spawnEnv = { ...process.env, PORT: '1984', TOKENWALL_HEADLESS: 'false' };
+    if (process.platform === 'win32' && process.env.APPDATA) {
+        const npmGlobalBin = path.join(process.env.APPDATA, 'npm');
+        // Find the actual PATH key (Windows uses 'Path', not 'PATH')
+        const pathKey = Object.keys(process.env).find(k => k.toUpperCase() === 'PATH') || 'Path';
+        const currentPath = spawnEnv[pathKey] || '';
+        if (!currentPath.includes(npmGlobalBin)) {
+            spawnEnv[pathKey] = `${npmGlobalBin};${currentPath}`;
+            daemonOutputChannel?.appendLine(`[Daemon Manager] Added npm global bin to PATH: ${npmGlobalBin}`);
+        }
+    }
+    function attemptSpawn(index) {
+        if (index >= strategies.length) {
+            daemonOutputChannel?.appendLine('[Daemon Manager] All spawn strategies failed.');
+            isSpawning = false;
+            isDownloadingDaemon = false;
+            updateStatusBarText('Offline', 'red');
+            daemonCrashCount++;
+            handleCrash();
+            return;
+        }
+        const strategy = strategies[index];
+        daemonOutputChannel?.appendLine(`[Daemon Manager] Attempting strategy "${strategy.name}": ${strategy.cmd} ${strategy.args.join(' ')}`);
+        if (strategy.name === 'npxFallback') {
+            isDownloadingDaemon = true;
+            updateStatusBarText('Downloading Daemon...', 'yellow');
+        }
+        let hasFailed = false;
+        const startTime = Date.now();
+        const child = (0, child_process_1.spawn)(strategy.cmd, strategy.args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            shell: strategy.useShell || process.platform === 'win32',
+            env: spawnEnv
+        });
+        daemonProcess = child;
+        child.stdout?.on('data', (data) => {
+            daemonOutputChannel?.appendLine(`[Daemon STDOUT] ${data.toString().trim()}`);
+        });
+        child.stderr?.on('data', (data) => {
+            daemonOutputChannel?.appendLine(`[Daemon STDERR] ${data.toString().trim()}`);
+        });
+        child.on('error', (err) => {
+            daemonOutputChannel?.appendLine(`[Daemon ERROR] Strategy "${strategy.name}" failed: ${err.message}`);
+            if (hasFailed)
+                return;
+            hasFailed = true;
+            daemonProcess = null;
+            // Immediately try next strategy
+            attemptSpawn(index + 1);
+        });
+        child.on('exit', (code) => {
+            daemonOutputChannel?.appendLine(`[Daemon EXIT] Strategy "${strategy.name}" exited with code ${code}`);
+            if (hasFailed)
+                return;
+            hasFailed = true;
+            daemonProcess = null;
+            isDownloadingDaemon = false;
+            updateStatusBarText('Offline', 'red');
+            if (intentionalStop) {
+                daemonOutputChannel?.appendLine('[Daemon Manager] Daemon was stopped intentionally. Auto-recovery skipped.');
+                intentionalStop = false;
+                isSpawning = false;
+                return;
+            }
+            const duration = Date.now() - startTime;
+            if (code !== 0 && duration < 3000) {
+                daemonOutputChannel?.appendLine(`[Daemon Manager] Strategy "${strategy.name}" failed quickly. Trying next strategy...`);
+                attemptSpawn(index + 1);
+            }
+            else {
+                if (duration < 5000) {
+                    daemonCrashCount++;
+                }
+                else {
+                    daemonCrashCount = 0; // Reset on clean run
+                }
+                handleCrash();
+            }
+        });
+    }
+    function handleCrash() {
+        isSpawning = false;
+        if (daemonCrashCount >= 3) {
+            daemonOutputChannel?.appendLine(`[Daemon Manager] Daemon crashed ${daemonCrashCount} times consecutively. Disabling auto-recovery.`);
+            vscode.window.showErrorMessage('TokenWall spend protection daemon failed to start. Please verify your Node/npm environment. You can try installing the package globally, or checking the logs.', 'Retry', 'Show Logs', 'Copy Install Command').then((selection) => {
+                if (selection === 'Retry') {
+                    daemonCrashCount = 0;
+                    launchDaemon(context);
+                }
+                else if (selection === 'Show Logs') {
+                    daemonOutputChannel?.show();
+                }
+                else if (selection === 'Copy Install Command') {
+                    vscode.env.clipboard.writeText('npm install -g tokenwall');
+                    vscode.window.showInformationMessage('Copied "npm install -g tokenwall" to clipboard.');
+                }
+            });
+            return;
+        }
+        const delays = [5000, 15000, 30000];
+        const delay = delays[Math.min(daemonCrashCount, delays.length - 1)];
+        daemonOutputChannel?.appendLine(`[Daemon Manager] Auto-recovery: waiting ${delay / 1000}s before checking/relaunching...`);
+        setTimeout(() => {
+            checkDaemonHealth().then((alive) => {
+                if (!alive)
+                    launchDaemon(context);
+            });
+        }, delay);
+    }
+    attemptSpawn(0);
+}
+function restartDaemon(context) {
+    stopDaemon();
+    vscode.window.showInformationMessage('Restarting TokenWall gateway daemon...');
+    daemonCrashCount = 0;
+    isSpawning = false;
+    setTimeout(() => launchDaemon(context), 1500);
+}
+function stopDaemon() {
+    if (daemonProcess) {
+        intentionalStop = true;
+        daemonProcess.kill();
+        daemonProcess = null;
+    }
+}
+// -------------------------------------------------------------
+// WebSocket Control Plane IPC Client
+// -------------------------------------------------------------
+function connectControlPlane(context) {
+    if (wsClient) {
+        try {
+            wsClient.close();
+        }
+        catch { }
+    }
+    wsClient = new ws_1.default('ws://127.0.0.1:1984/ws/control');
+    wsClient.on('open', () => {
+        isConnected = true;
+        isDownloadingDaemon = false;
+        daemonCrashCount = 0;
+        isSpawning = false;
+        console.log('WS Connection to TokenWall Control Plane established.');
+        updateStatusBarText('Active', 'green');
+        fetchStatsAndUpdateUI();
+        // Start ping interval
+        if (pingInterval)
+            clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+            if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
+                wsClient.ping();
+            }
+        }, 15000); // 15 second ping to keep connection alive
+    });
+    wsClient.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'approval_pending') {
+                const req = msg.payload;
+                if (!activeQuickPicks.has(req.requestId)) {
+                    handlePendingApproval(req);
+                }
+            }
+            else if (msg.type === 'approval_cleared') {
+                const { requestId } = msg.payload;
+                const qp = activeQuickPicks.get(requestId);
+                if (qp) {
+                    qp.hide();
+                }
+            }
+            else if (msg.type === 'notification') {
+                const { message, style } = msg.payload;
+                if (style === 'error') {
+                    vscode.window.showErrorMessage(message);
+                }
+                else if (style === 'warning') {
+                    vscode.window.showWarningMessage(message);
+                }
+                else {
+                    vscode.window.showInformationMessage(message);
+                }
+            }
+        }
+        catch (err) {
+            console.error('Invalid WS message', err);
+        }
+    });
+    wsClient.on('close', () => {
+        isConnected = false;
+        if (pingInterval)
+            clearInterval(pingInterval);
+        updateStatusBarText('Reconnecting...', 'yellow');
+        // Retry connection after 3 seconds
+        if (reconnectTimer)
+            clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+            connectControlPlane(context);
+        }, 3000);
+    });
+    wsClient.on('error', () => {
+        isConnected = false;
+    });
+}
+let isShowingQuickPick = false;
+const pendingQueue = [];
+async function processQueue() {
+    if (isShowingQuickPick || pendingQueue.length === 0)
+        return;
+    isShowingQuickPick = true;
+    try {
+        const req = pendingQueue.shift();
+        await showApprovalUI(req);
+    }
+    finally {
+        isShowingQuickPick = false;
+        if (pendingQueue.length > 0) {
+            setTimeout(processQueue, 100);
+        }
+    }
+}
+function showApprovalUI(req) {
+    return new Promise((resolve) => {
+        const costText = `$${req.estimatedCost.toFixed(4)}`;
+        const quickPick = vscode.window.createQuickPick();
+        quickPick.title = `🛡️ TokenWall Spend Intercept — ${req.model}`;
+        quickPick.placeholder = `Estimated request cost is ${costText}. Choose an action below:`;
+        const items = [];
+        items.push({
+            label: `$(zap) Optimize Prompt & Proceed`,
+            description: 'Strip comments, minify JSON, and align cache prefixes losslessly',
+            detail: 'Bypasses waste to decrease latency and reduce token cost'
+        });
+        items.push({
+            label: `$(check) Approve As-Is`,
+            description: 'Proceed with this request as-is without optimizing context',
+            detail: `Proceed at full estimated cost of ${costText}`
+        });
+        if (req.routingAlternatives && req.routingAlternatives.length > 0) {
+            items.push({
+                label: `$(git-compare) Switch Model`,
+                description: 'Switch to a cost-efficient model alternative',
+                detail: `Alternatives: ${req.routingAlternatives.map(alt => `${alt.model} (${alt.savingsPercentage}% saved)`).join(', ')}`
+            });
+        }
+        items.push({
+            label: `$(x) Block Request`,
+            description: 'Block this request from hitting the provider API',
+            detail: 'Terminates this call to preserve remaining budget'
+        });
+        if (req.warnings && req.warnings.length > 0) {
+            items.push({
+                label: '⚠️ Spend Warnings & Inefficiencies Detected',
+                kind: vscode.QuickPickItemKind.Separator
+            });
+            for (const w of req.warnings) {
+                const desc = typeof w === 'string' ? w : w.description || JSON.stringify(w);
+                items.push({
+                    label: `  ${desc}`,
+                    alwaysShow: true
+                });
+            }
+        }
+        quickPick.items = items;
+        quickPick.ignoreFocusOut = true;
+        activeQuickPicks.set(req.requestId, quickPick);
+        let isResolving = false;
+        quickPick.onDidAccept(async () => {
+            const selected = quickPick.selectedItems[0];
+            if (!selected || selected.kind === vscode.QuickPickItemKind.Separator || selected.label.startsWith('  '))
+                return;
+            isResolving = true;
+            quickPick.hide();
+            let action = 'cancel';
+            let chosenModel = undefined;
+            if (selected.label.includes('Approve As-Is')) {
+                action = 'approve';
+            }
+            else if (selected.label.includes('Optimize Prompt')) {
+                action = 'optimize';
+            }
+            else if (selected.label.includes('Switch Model') && req.routingAlternatives) {
+                const quickPickItems = req.routingAlternatives.map((alt) => ({
+                    label: alt.model,
+                    description: `Cost: $${alt.estimatedCost.toFixed(4)} | Savings: ${alt.savingsPercentage}%`,
+                    detail: `Quality Level: ${alt.qualityLevel}`,
+                    modelName: alt.model
+                }));
+                const picked = await vscode.window.showQuickPick(quickPickItems, {
+                    title: 'Select Cost-Efficient Model Alternative',
+                    placeHolder: `Switch from ${req.model}`
+                });
+                if (picked) {
+                    action = 'switch_model';
+                    chosenModel = picked.modelName;
+                }
+                else {
+                    action = 'cancel';
+                }
+            }
+            if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
+                wsClient.send(JSON.stringify({
+                    type: 'approval_resolved',
+                    payload: {
+                        requestId: req.requestId,
+                        action,
+                        chosenModel
+                    }
+                }));
+            }
+            activeQuickPicks.delete(req.requestId);
+            quickPick.dispose();
+            resolve();
+        });
+        quickPick.onDidHide(() => {
+            if (!isResolving) {
+                if (wsClient && wsClient.readyState === ws_1.default.OPEN) {
+                    wsClient.send(JSON.stringify({
+                        type: 'approval_resolved',
+                        payload: {
+                            requestId: req.requestId,
+                            action: 'cancel'
+                        }
+                    }));
+                }
+                activeQuickPicks.delete(req.requestId);
+                quickPick.dispose();
+                resolve();
+            }
+        });
+        quickPick.show();
+    });
+}
+async function handlePendingApproval(req) {
+    pendingQueue.push(req);
+    processQueue();
+}
+// -------------------------------------------------------------
+// Live Observability Status Bar & Stats Fetch
+// -------------------------------------------------------------
+async function fetchStatsAndUpdateUI() {
+    if (!isConnected)
+        return;
+    try {
+        const res = await fetch('http://127.0.0.1:1984/api/admin/summary');
+        if (res.ok) {
+            const summary = await res.json();
+            const totalSaved = summary.preventedSpend + summary.optimizedSavings;
+            const text = `Today: $${summary.dailySpend.toFixed(2)} • Saved: $${totalSaved.toFixed(2)}`;
+            const warningPercent = summary.dailySpend / (summary.dailyLimit || 10.0);
+            let color = 'green';
+            if (warningPercent >= 0.9) {
+                color = 'red';
+            }
+            else if (warningPercent >= 0.7) {
+                color = 'yellow';
+            }
+            updateStatusBarText(text, color);
+        }
+    }
+    catch {
+        updateStatusBarText('Offline', 'red');
+    }
+}
+function updateStatusBarText(text, color) {
+    if (!statusBarItem)
+        return;
+    if (isDownloadingDaemon && (text === 'Reconnecting...' || text === 'Offline')) {
+        statusBarItem.text = `$(cloud-download) Downloading Daemon...`;
+        statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+        return;
+    }
+    statusBarItem.text = `$(shield) ${text}`;
+    if (color === 'red') {
+        statusBarItem.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+    }
+    else if (color === 'yellow') {
+        statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+    }
+    else {
+        statusBarItem.color = undefined;
+    }
+}
+async function showStatusSummary() {
+    try {
+        const res = await fetch('http://127.0.0.1:1984/api/admin/summary');
+        if (!res.ok) {
+            vscode.window.showErrorMessage('TokenWall Gateway daemon API is unreachable.');
+            return;
+        }
+        const summary = await res.json();
+        const totalSaved = summary.preventedSpend + summary.optimizedSavings;
+        const actionItems = [
+            {
+                label: `$(graph) Open Observability Dashboard`,
+                detail: 'View detailed analytics and forensic logs',
+                action: 'open_dashboard'
+            },
+            {
+                label: `$(settings-gear) Configure TokenWall Limits`,
+                detail: 'Set daily/monthly budgets and optimization preferences',
+                action: 'configure_limits'
+            },
+            {
+                label: '--- Spend Summary ---',
+                kind: vscode.QuickPickItemKind.Separator
+            }
+        ];
+        const quickPickItems = [
+            ...actionItems,
+            {
+                label: `Today's Spend: $${summary.dailySpend.toFixed(4)} / $${summary.dailyLimit.toFixed(2)}`,
+                detail: `Daily budget consumption: ${Math.round((summary.dailySpend / (summary.dailyLimit || 10.0)) * 100)}%`
+            },
+            {
+                label: `Total Prevented Cost: $${summary.preventedSpend.toFixed(4)}`,
+                detail: 'Savings from blocked runaway loops or budget blocks'
+            },
+            {
+                label: `Total Optimized Savings: $${summary.optimizedSavings.toFixed(4)}`,
+                detail: `Saved ${summary.savedTokens.toLocaleString()} tokens via prompt compressions / switches`
+            },
+            {
+                label: '--- Workspace Attribution ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.workspaces.map(w => ({
+                label: `  ${w.project_name}`,
+                detail: `Accumulated Spend: $${w.total_spend.toFixed(4)}`
+            })),
+            {
+                label: '--- Provider Breakdown ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.providers.map(p => ({
+                label: `  ${p.provider.toUpperCase()}`,
+                detail: `Spend: $${p.total_spend.toFixed(4)} (${p.request_count} requests)`
+            })),
+            {
+                label: '--- Model Breakdown ---',
+                kind: vscode.QuickPickItemKind.Separator
+            },
+            ...summary.models.map(m => ({
+                label: `  ${m.model}`,
+                detail: `Spend: $${m.total_spend.toFixed(4)} (${m.request_count} requests)`
+            }))
+        ];
+        const picked = await vscode.window.showQuickPick(quickPickItems, {
+            title: `TokenWall Summary • Total Savings: $${totalSaved.toFixed(2)}`,
+            placeHolder: 'Select an action or view summary'
+        });
+        if (picked && picked.action) {
+            if (picked.action === 'open_dashboard') {
+                vscode.env.openExternal(vscode.Uri.parse('http://127.0.0.1:1984/dashboard/'));
+            }
+            else if (picked.action === 'configure_limits') {
+                vscode.commands.executeCommand('workbench.action.openSettings', 'tokenwall');
+            }
+        }
+    }
+    catch (err) {
+        vscode.window.showErrorMessage(`Failed to fetch stats: ${err.message}`);
+    }
+}
+// -------------------------------------------------------------
+// Local Configuration Sync
+// -------------------------------------------------------------
+function syncSettingsToConfigFile() {
+    try {
+        const configDir = path.join(os.homedir(), '.tokenwall');
+        const configPath = path.join(configDir, 'config.json');
+        let current = {};
+        if (fs.existsSync(configPath)) {
+            try {
+                current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            }
+            catch { }
+        }
+        const settings = vscode.workspace.getConfiguration('tokenwall');
+        current.dailyLimit = settings.get('dailyLimit', 10.0);
+        current.monthlyLimit = settings.get('monthlyLimit', 100.0);
+        current.sessionLimit = settings.get('sessionLimit', 2.0);
+        current.hardLimitsEnabled = settings.get('hardLimitsEnabled', true);
+        current.autoApproveLimit = settings.get('autoApproveLimit', 0.10);
+        current.autoDenyLimit = settings.get('autoDenyLimit', 5.00);
+        current.autoOptimize = settings.get('autoOptimize', false);
+        if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+        }
+        fs.writeFileSync(configPath, JSON.stringify(current, null, 2), 'utf8');
+        console.log('Synchronized VS Code settings with ~/.tokenwall/config.json');
+    }
+    catch (err) {
+        console.error('Error synchronizing TokenWall configuration settings', err);
+    }
+}
+async function autoConfigureAIExtensions() {
+    const extensions = vscode.extensions.all;
+    // 1. Check for Cline
+    const clineExt = extensions.find(e => e.id === 'saoudrizwan.claude-dev');
+    if (clineExt) {
+        const config = vscode.workspace.getConfiguration('cline');
+        const provider = config.get('apiProvider');
+        if (provider !== 'custom') {
+            const opt = await vscode.window.showInformationMessage('TokenWall detected the Cline extension. Enable automatic spend protection and loop blocking for Cline?', 'Enable Protection', 'No');
+            if (opt === 'Enable Protection') {
+                await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
+                await config.update('apiEndpoint', 'http://127.0.0.1:1984/v1', vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage('TokenWall spend protection enabled for Cline!');
+            }
+        }
+    }
+    // 2. Check for Roo Cline
+    const rooClineExt = extensions.find(e => e.id === 'RooVeterinaryInc.roo-cline');
+    if (rooClineExt) {
+        const config = vscode.workspace.getConfiguration('roo-cline');
+        const provider = config.get('apiProvider');
+        if (provider !== 'custom') {
+            const opt = await vscode.window.showInformationMessage('TokenWall detected the Roo Cline extension. Enable automatic spend protection and loop blocking for Roo Cline?', 'Enable Protection', 'No');
+            if (opt === 'Enable Protection') {
+                await config.update('apiProvider', 'custom', vscode.ConfigurationTarget.Global);
+                await config.update('apiEndpoint', 'http://127.0.0.1:1984/v1', vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage('TokenWall spend protection enabled for Roo Cline!');
+            }
+        }
+    }
+    // 3. Check for Claude Code extension
+    const claudeCodeExt = extensions.find(e => e.id.toLowerCase() === 'anthropic.claude-code' || e.id.toLowerCase().includes('claude-code'));
+    if (claudeCodeExt) {
+        const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+        let hasBaseUrl = false;
+        let claudeSettings = {};
+        if (fs.existsSync(claudeSettingsPath)) {
+            try {
+                claudeSettings = JSON.parse(fs.readFileSync(claudeSettingsPath, 'utf8'));
+                if (claudeSettings.env && claudeSettings.env.ANTHROPIC_BASE_URL) {
+                    hasBaseUrl = true;
+                }
+            }
+            catch (e) {
+                console.error('Failed to parse ~/.claude/settings.json', e);
+            }
+        }
+        if (!hasBaseUrl) {
+            const opt = await vscode.window.showInformationMessage('TokenWall detected the Claude Code extension. Enable automatic spend protection and loop blocking for Claude Code?', 'Enable Protection', 'No');
+            if (opt === 'Enable Protection') {
+                if (!claudeSettings.env) {
+                    claudeSettings.env = {};
+                }
+                claudeSettings.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:1984';
+                try {
+                    const claudeDir = path.dirname(claudeSettingsPath);
+                    if (!fs.existsSync(claudeDir)) {
+                        fs.mkdirSync(claudeDir, { recursive: true });
+                    }
+                    fs.writeFileSync(claudeSettingsPath, JSON.stringify(claudeSettings, null, 2), 'utf8');
+                    vscode.window.showInformationMessage('TokenWall spend protection enabled for Claude Code!');
+                }
+                catch (e) {
+                    console.error('Failed to update ~/.claude/settings.json', e);
+                    vscode.window.showErrorMessage('Failed to configure Claude Code. Please manually add ANTHROPIC_BASE_URL to your ~/.claude/settings.json.');
+                }
+            }
+        }
+    }
+}
+//# sourceMappingURL=extension.js.map

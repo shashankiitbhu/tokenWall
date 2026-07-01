@@ -1,0 +1,187 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Paths
+const jsonPath = path.join(__dirname, 'eval_results_data.json');
+const svgDestPath = path.join(__dirname, 'linkedin_chart.svg');
+
+function generateSvg() {
+  if (!fs.existsSync(jsonPath)) {
+    console.error('JSON data file not found! Run evaluate_optimizations.mjs first.');
+    process.exit(1);
+  }
+
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  const { summary, benchmarks } = data;
+
+  const savingsPercent = summary.aggregate.savingsPercent;
+  const beforeTokens = summary.aggregate.beforeTokens;
+  const afterTokens = summary.aggregate.afterTokens;
+  const monthlyCostSaved = summary.projections.monthlyCostSaved;
+  const latency = summary.aggregate.avgLatencyMs;
+
+  // Build minimalist SVG with warm white background and greyscale tones
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <!-- Card Background Gradient -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#fafafa" />
+    </linearGradient>
+  </defs>
+
+  <style>
+    .title { font-family: 'Outfit', 'Inter', sans-serif; font-weight: 800; }
+    .body-text { font-family: 'Inter', sans-serif; }
+    .mono { font-family: 'Courier New', Courier, monospace; }
+  </style>
+
+  <!-- Warm White Solid Background -->
+  <rect width="1200" height="630" fill="#FAF9F5" />
+
+  <!-- Subtle Light Grey Grid Lines -->
+  <path d="M 0,80 L 1200,80 M 0,160 L 1200,160 M 0,240 L 1200,240 M 0,320 L 1200,320 M 0,400 L 1200,400 M 0,480 L 1200,480 M 0,560 L 1200,560" stroke="#F1EFEA" stroke-width="1" />
+  <path d="M 100,0 L 100,630 M 200,0 L 200,630 M 300,0 L 300,630 M 400,0 L 400,630 M 500,0 L 500,630 M 600,0 L 600,630 M 700,0 L 700,630 M 800,0 L 800,630 M 900,0 L 900,630 M 1000,0 L 1000,630 M 1100,0 L 1100,630" stroke="#F1EFEA" stroke-width="1" />
+
+  <!-- Outer Border -->
+  <rect x="0.5" y="0.5" width="1199" height="629" fill="none" stroke="#E2E0D9" stroke-width="1" rx="16" />
+
+  <!-- ================= LEFT COLUMN ================= -->
+
+  <!-- Logo and Header -->
+  <g transform="translate(60, 60)">
+    <rect width="36" height="36" rx="8" fill="#111111" />
+    <text x="11" y="24" fill="#ffffff" font-size="18" font-family="'Outfit', sans-serif" font-weight="900">T</text>
+    <text x="50" y="25" fill="#111111" font-size="22" font-family="'Outfit', sans-serif" font-weight="800" letter-spacing="-0.02em">TokenWall</text>
+    
+    <!-- Spend Firewall Badge -->
+    <rect x="175" y="4" width="130" height="26" rx="13" fill="#EAE8E1" stroke="#D1CFC7" stroke-width="1" />
+    <text x="240" y="21" fill="#4B5563" font-size="10" font-family="'Inter', sans-serif" font-weight="700" letter-spacing="0.05em" text-anchor="middle">SPEND FIREWALL</text>
+  </g>
+
+  <!-- Main Hero Title -->
+  <g transform="translate(60, 140)">
+    <text class="title" fill="#111111" font-size="48" letter-spacing="-0.03em" y="40">Slash LLM Agent Costs</text>
+    <text class="title" fill="#4B5563" font-size="48" letter-spacing="-0.03em" y="95">by ${savingsPercent}%</text>
+    <text class="body-text" fill="#6B7280" font-size="18" font-weight="400" y="140">Zero-friction local prompt compression and context crushing</text>
+  </g>
+
+  <!-- Metrics Grid -->
+  <g transform="translate(60, 340)">
+    <!-- Metric 1: Savings -->
+    <g transform="translate(0, 0)">
+      <rect width="220" height="105" rx="16" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="32">SAVINGS</text>
+      <text class="title" fill="#111827" font-size="34" font-weight="800" x="20" y="70">${savingsPercent}%</text>
+      <text class="body-text" fill="#6b7280" font-size="11" x="20" y="90">Token Reduction</text>
+    </g>
+
+    <!-- Metric 2: Dollars saved -->
+    <g transform="translate(250, 0)">
+      <rect width="220" height="105" rx="16" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="32">MONTHLY SAVED</text>
+      <text class="title" fill="#111827" font-size="34" font-weight="800" x="20" y="70">$${monthlyCostSaved.toFixed(0)}</text>
+      <text class="body-text" fill="#6b7280" font-size="11" x="20" y="90">At 200 runs / day</text>
+    </g>
+
+    <!-- Metric 3: Latency -->
+    <g transform="translate(0, 130)">
+      <rect width="220" height="100" rx="16" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="32">LOCAL OVERHEAD</text>
+      <text class="title" fill="#111827" font-size="32" font-weight="800" x="20" y="68">${latency.toFixed(2)}ms</text>
+      <text class="body-text" fill="#6b7280" font-size="11" x="20" y="86">Compute latency</text>
+    </g>
+
+    <!-- Metric 4: Platform -->
+    <g transform="translate(250, 130)">
+      <rect width="220" height="100" rx="16" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="32">UPSTREAM MODEL</text>
+      <text class="title" fill="#111827" font-size="20" font-weight="800" x="20" y="65">Claude 4.8 Opus</text>
+      <text class="body-text" fill="#6b7280" font-size="11" x="20" y="84">Opus Pricing</text>
+    </g>
+  </g>
+
+  <!-- ================= RIGHT COLUMN ================= -->
+
+  <!-- Visual Comparative Chart Box -->
+  <g transform="translate(580, 80)">
+    <!-- White Card Box container -->
+    <rect width="560" height="490" rx="20" fill="#ffffff" stroke="#E5E7EB" stroke-width="1" />
+    
+    <text class="title" fill="#111827" font-size="18" font-weight="700" x="35" y="45">Benchmark: Total Message Payload Size</text>
+    <text class="body-text" fill="#6B7280" font-size="12" x="35" y="68">Comparative tokens count across evaluated test runs</text>
+    
+    <!-- Y Axis Labels -->
+    <text class="body-text" fill="#111827" font-size="14" font-weight="700" x="50" y="145">BEFORE</text>
+    <text class="body-text" fill="#6B7280" font-size="12" x="50" y="165">${beforeTokens.toLocaleString()} tokens</text>
+    
+    <!-- Before Bar (Dark Charcoal) -->
+    <rect x="170" y="125" width="310" height="40" rx="8" fill="#374151" />
+    <!-- Before Token Count label inside bar -->
+    <text class="title" fill="#ffffff" font-size="13" font-weight="800" x="430" y="149">100%</text>
+
+    <text class="body-text" fill="#111827" font-size="14" font-weight="700" x="50" y="245">AFTER</text>
+    <text class="body-text" fill="#6B7280" font-size="12" x="50" y="265">${afterTokens.toLocaleString()} tokens</text>
+    
+    <!-- After Bar (Lighter Grey) -->
+    <rect x="170" y="225" width="${Math.round(310 * (afterTokens / beforeTokens))}" height="40" rx="8" fill="#9CA3AF" />
+    <!-- Saved Label -->
+    <text class="title" fill="#111827" font-size="13" font-weight="800" x="${170 + Math.round(310 * (afterTokens / beforeTokens)) + 15}" y="249">-${savingsPercent}%</text>
+
+    <!-- Horizontal separator line -->
+    <line x1="35" y1="310" x2="525" y2="310" stroke="#E5E7EB" stroke-width="1" />
+
+    <!-- Optimization Category Badges -->
+    <text class="title" fill="#111827" font-size="14" font-weight="700" x="35" y="345">Engine Efficiency Breakdown</text>
+    
+    <!-- Category list -->
+    <g transform="translate(35, 370)">
+      <!-- Item 1: Boilerplate -->
+      <g transform="translate(0, 0)">
+        <circle cx="10" cy="10" r="4" fill="#374151" />
+        <text class="body-text" fill="#111827" font-size="13" x="25" y="14">Boilerplate Stripping</text>
+        <rect x="250" y="0" width="70" height="20" rx="6" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+        <text class="title" fill="#374151" font-size="11" font-weight="800" x="285" y="14" text-anchor="middle">-${benchmarks[0].savingsPercent.toFixed(1)}%</text>
+      </g>
+
+      <!-- Item 2: System prompts -->
+      <g transform="translate(0, 30)">
+        <circle cx="10" cy="10" r="4" fill="#4B5563" />
+        <text class="body-text" fill="#111827" font-size="13" x="25" y="14">System Prompt Compression</text>
+        <rect x="250" y="0" width="70" height="20" rx="6" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+        <text class="title" fill="#374151" font-size="11" font-weight="800" x="285" y="14" text-anchor="middle">-${benchmarks[1].savingsPercent.toFixed(1)}%</text>
+      </g>
+
+      <!-- Item 3: Tool Routing -->
+      <g transform="translate(0, 60)">
+        <circle cx="10" cy="10" r="4" fill="#6B7280" />
+        <text class="body-text" fill="#111827" font-size="13" x="25" y="14">Dynamic Tool Routing</text>
+        <rect x="250" y="0" width="70" height="20" rx="6" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+        <text class="title" fill="#374151" font-size="11" font-weight="800" x="285" y="14" text-anchor="middle">-${benchmarks[2].savingsPercent.toFixed(1)}%</text>
+      </g>
+
+      <!-- Item 4: Tool payload crushing -->
+      <g transform="translate(0, 90)">
+        <circle cx="10" cy="10" r="4" fill="#9CA3AF" />
+        <text class="body-text" fill="#111827" font-size="13" x="25" y="14">Tool Payload Crushing</text>
+        <rect x="250" y="0" width="70" height="20" rx="6" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+        <text class="title" fill="#374151" font-size="11" font-weight="800" x="285" y="14" text-anchor="middle">-${benchmarks[4].savingsPercent.toFixed(1)}%</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Watermark / Footer -->
+  <text class="body-text" fill="rgba(17, 24, 39, 0.3)" font-size="10" font-weight="600" letter-spacing="0.1em" x="1140" y="605" text-anchor="end">TOKENWALL BENCHMARKS 2026</text>
+</svg>`;
+
+  fs.writeFileSync(svgDestPath, svg);
+
+  console.log('LinkedIn vector SVG chart generated successfully!');
+  console.log(`SVG written to: ${svgDestPath}`);
+}
+
+generateSvg();

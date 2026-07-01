@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TokenWall Optimization Benchmark Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-color: #faf9f5;
+      --card-bg: #ffffff;
+      --card-border: #e5e7eb;
+      --text-main: #111827;
+      --text-muted: #4b5563;
+      --primary: #111111;
+      --secondary: #4b5563;
+      --accent: #6b7280;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      line-height: 1.5;
+      padding: 40px 20px;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 50px;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      color: #111111;
+      margin-bottom: 10px;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* Grid layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 24px;
+      margin-bottom: 50px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-1px);
+      border-color: #d1d5db;
+    }
+
+    .col-4 { grid-column: span 4; }
+    .col-7 { grid-column: span 7; }
+    .col-5 { grid-column: span 5; }
+    .col-12 { grid-column: span 12; }
+
+    /* Stat values */
+    .stat-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      justify-content: space-between;
+    }
+
+    .stat-label {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-family: 'Outfit', sans-serif;
+      font-size: 3rem;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 8px;
+      color: #111111;
+    }
+
+    .stat-sub {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .stat-sub span {
+      font-weight: 600;
+      color: #111111;
+    }
+
+    /* Table styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    th {
+      text-align: left;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 600;
+    }
+
+    td {
+      padding: 16px;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 0.95rem;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: #f3f4f6;
+      color: #111111;
+      border: 1px solid #e5e7eb;
+    }
+
+    /* LinkedIn Share Card Container */
+    .linkedin-card-section {
+      margin-top: 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .section-title {
+      font-size: 1.8rem;
+      margin-bottom: 10px;
+      color: #111111;
+      text-align: center;
+    }
+
+    .linkedin-wrapper {
+      padding: 10px;
+      background: #e5e7eb;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    }
+
+    /* 1200x630 exact landscape layout */
+    .linkedin-card-export {
+      width: 1200px;
+      height: 630px;
+      background-color: #faf9f5;
+      border: 1px solid #e2e0d9;
+      border-radius: 16px;
+      padding: 40px;
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+      color: #111111;
+    }
+
+    /* Cyber grid overlay for premium asset background */
+    .linkedin-card-export::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(#f1efea 1px, transparent 1px),
+        linear-gradient(90deg, #f1efea 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    .linkedin-left {
+      width: 50%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      z-index: 10;
+    }
+
+    .linkedin-right {
+      width: 45%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .brand-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: #111111;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: white;
+      font-size: 1.1rem;
+    }
+
+    .brand-name {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 1.4rem;
+      letter-spacing: -0.02em;
+      color: #111111;
+    }
+
+    .brand-badge {
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: #eae8e1;
+      border: 1px solid #d1cfc7;
+      color: #4b5563;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .hero-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 3.2rem;
+      line-height: 1.1;
+      font-weight: 800;
+      margin: 20px 0;
+      letter-spacing: -0.03em;
+      color: #111111;
+    }
+
+    .hero-title span {
+      color: #4b5563;
+    }
+
+    .linkedin-metadata {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+    }
+
+    .linkedin-metadata span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .linkedin-metadata strong {
+      color: #111111;
+    }
+
+    .metric-grid-card {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      width: 100%;
+      margin-top: 20px;
+    }
+
+    .micro-metric {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .micro-val {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1.1;
+      margin-top: 4px;
+      color: #111111;
+    }
+
+    .micro-lbl {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .chart-container-li {
+      width: 100%;
+      height: 280px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .watermark {
+      position: absolute;
+      bottom: 20px;
+      right: 40px;
+      font-size: 0.75rem;
+      color: rgba(17, 24, 39, 0.3);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>TokenWall Spend Optimizer</h1>
+      <p>Performance & Token Optimization Benchmarking Results</p>
+    </header>
+
+    <div class="dashboard-grid">
+      <!-- Row 1: Core Stats -->
+      <div class="card col-4">
+        <div class="stat-container">
+          <div class="stat-label">Average Token Savings</div>
+          <div class="stat-value">73.6%</div>
+          <div class="stat-sub">Reduced overall prompt context payload size by <span>3.7x</span></div>
+        </div>
+      </div>
+      <div class="card col-4">
+        <div class="stat-container">
+          <div class="stat-label">Local Compute Latency</div>
+          <div class="stat-value">2.65ms</div>
+          <div class="stat-sub">Negligible overhead proxy routing logic</div>
+        </div>
+      </div>
+      <div class="card col-4">
+        <div class="stat-container">
+          <div class="stat-label">Projected Monthly Savings</div>
+          <div class="stat-value">$261.54</div>
+          <div class="stat-sub">Based on 200 runs/day on <span>Claude 4.8 Opus</span></div>
+        </div>
+      </div>
+
+      <!-- Row 2: Charts and detailed table -->
+      <div class="card col-7">
+        <h3 style="margin-bottom: 20px;">Category Breakdown (Tokens Before vs. After)</h3>
+        <div style="width: 100%; height: 320px; position: relative;">
+          <canvas id="detailsChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card col-5">
+        <h3 style="margin-bottom: 15px;">Monthly Spend Projections</h3>
+        <div style="font-size: 0.95rem; color: var(--text-muted); margin-bottom: 20px;">
+          Simulating a production dev workspace generating 200 coding agent request loops daily.
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
+            <span>Standard API Cost:</span>
+            <span style="font-weight: 700; color: #111111;">$355.47 / mo</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--card-border); padding-bottom: 8px;">
+            <span>TokenWall Optimized Cost:</span>
+            <span style="font-weight: 700; color: #4b5563;">$93.93 / mo</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding-bottom: 8px;">
+            <span style="font-weight: 600;">Net Monthly Wallet Savings:</span>
+            <span style="font-weight: 800; color: #111111; font-size: 1.2rem;">$261.54 (73.6%)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Metrics Table -->
+      <div class="card col-12">
+        <h3 style="margin-bottom: 15px;">Detailed Evaluation Scenarios</h3>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Optimization Category</th>
+                <th>Before (Tokens)</th>
+                <th>After (Tokens)</th>
+                <th>Savings %</th>
+                <th>Latency</th>
+                <th>Cost Savings (Per 1k runs)</th>
+              </tr>
+            </thead>
+            <tbody id="table-body">
+              <!-- Rendered via Javascript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- LinkedIn Infographic Card Section -->
+    <div class="linkedin-card-section">
+      <h2 class="section-title">LinkedIn Shareable Asset</h2>
+      <p style="color: var(--text-muted); max-width: 600px; text-align: center; font-size: 0.95rem;">
+        This card is styled with standard 1200x630 dimensions. An SVG layout version is exported as a standalone vector file.
+      </p>
+
+      <div class="linkedin-wrapper">
+        <div id="linkedin-card" class="linkedin-card-export">
+          <div class="linkedin-left">
+            <div class="brand-container">
+              <div class="brand-logo">T</div>
+              <div class="brand-name">TokenWall</div>
+              <div class="brand-badge">Spend Firewall</div>
+            </div>
+
+            <div>
+              <h2 class="hero-title">Slash LLM Agent Costs by <span>73.6%</span></h2>
+              <p style="font-size: 1.15rem; color: #4b5563; max-width: 500px; font-weight: 400;">
+                Zero-friction prompt compression, context crushing, and intelligent tool pruning running completely local.
+              </p>
+            </div>
+
+            <div class="linkedin-metadata">
+              <span>Model: <strong>Claude 4.8 Opus</strong></span>
+              <span>Proxy Latency: <strong>2.6ms</strong></span>
+            </div>
+          </div>
+
+          <div class="linkedin-right">
+            <div class="chart-container-li">
+              <canvas id="liChart"></canvas>
+            </div>
+            
+            <div class="metric-grid-card">
+              <div class="micro-metric">
+                <span class="micro-lbl">Saved Input Tokens</span>
+                <span class="micro-val">73.6%</span>
+              </div>
+              <div class="micro-metric">
+                <span class="micro-lbl">Spend Prevention</span>
+                <span class="micro-val">$262/mo</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="watermark">TokenWall Benchmarks 2026</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Inline data directly from eval_results_data.json
+    const data = {
+      "summary": {
+        "model": "claude-opus-4-8",
+        "inputPricePerM": 5,
+        "aggregate": {
+          "beforeTokens": 11849,
+          "afterTokens": 3131,
+          "tokensSaved": 8718,
+          "savingsPercent": 73.6,
+          "costBefore": 0.0592,
+          "costAfter": 0.0157,
+          "costSaved": 0.0436,
+          "avgLatencyMs": 2.65
+        },
+        "projections": {
+          "dailyRuns": 200,
+          "dailyTokensSaved": 1743600,
+          "dailyCostBefore": 11.85,
+          "dailyCostAfter": 3.13,
+          "dailyCostSaved": 8.72,
+          "monthlyCostBefore": 355.47,
+          "monthlyCostAfter": 93.93,
+          "monthlyCostSaved": 261.54
+        }
+      },
+      "benchmarks": [
+        {
+          "id": "conversational_fillers",
+          "name": "Boilerplate Stripping",
+          "beforeTokens": 55,
+          "afterTokens": 42,
+          "savingsPercent": 23.6,
+          "latencyMs": 2.82
+        },
+        {
+          "id": "system_prompt_compression",
+          "name": "System Prompt Compression",
+          "beforeTokens": 470,
+          "afterTokens": 434,
+          "savingsPercent": 7.7,
+          "latencyMs": 3.09
+        },
+        {
+          "id": "tool_routing",
+          "name": "Dynamic Tool Routing",
+          "beforeTokens": 981,
+          "afterTokens": 259,
+          "savingsPercent": 73.6,
+          "latencyMs": 0.21
+        },
+        {
+          "id": "tool_schema_optimization",
+          "name": "Tool Schema Minimization",
+          "beforeTokens": 981,
+          "afterTokens": 975,
+          "savingsPercent": 0.6,
+          "latencyMs": 0.4
+        },
+        {
+          "id": "tool_payload_crushing",
+          "name": "Tool Response Payload Crushing",
+          "beforeTokens": 9362,
+          "afterTokens": 1421,
+          "savingsPercent": 84.8,
+          "latencyMs": 2.2
+        }
+      ]
+    };
+
+    // Render Table
+    const tbody = document.getElementById('table-body');
+    data.benchmarks.forEach(item => {
+      const tr = document.createElement('tr');
+      
+      const dollarsSavedPerK = (item.beforeTokens - item.afterTokens) * 1000 * 5e-6;
+
+      tr.innerHTML = `
+        <td><span class="badge">${item.name}</span></td>
+        <td style="font-weight: 500;">${item.beforeTokens.toLocaleString()}</td>
+        <td style="font-weight: 500; color: #111111;">${item.afterTokens.toLocaleString()}</td>
+        <td style="font-weight: 600; color: #4b5563;">-${item.savingsPercent}%</td>
+        <td>${item.latencyMs.toFixed(2)}ms</td>
+        <td style="font-weight: 600; color: #111111;">$${dollarsSavedPerK.toFixed(4)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // Render Dashboard Chart
+    const ctx = document.getElementById('detailsChart').getContext('2d');
+    const labels = data.benchmarks.map(b => b.name);
+    const beforeData = data.benchmarks.map(b => b.beforeTokens);
+    const afterData = data.benchmarks.map(b => b.afterTokens);
+
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Before (Tokens)',
+            data: beforeData,
+            backgroundColor: '#374151',
+            borderColor: '#111827',
+            borderWidth: 1,
+            borderRadius: 6
+          },
+          {
+            label: 'After (Tokens)',
+            data: afterData,
+            backgroundColor: '#9ca3af',
+            borderColor: '#4b5563',
+            borderWidth: 1,
+            borderRadius: 6
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: '#e5e7eb' },
+            ticks: { color: '#4b5563' }
+          },
+          x: {
+            grid: { display: false },
+            ticks: { color: '#4b5563' }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#111827', font: { family: 'Inter' } }
+          }
+        }
+      }
+    });
+
+    // Render LinkedIn Infographic Chart (Horizontal Bar Chart for Token Savings)
+    const liCtx = document.getElementById('liChart').getContext('2d');
+    
+    new Chart(liCtx, {
+      type: 'bar',
+      data: {
+        labels: ['Before', 'After'],
+        datasets: [{
+          label: 'Total Message Tokens',
+          data: [data.summary.aggregate.beforeTokens, data.summary.aggregate.afterTokens],
+          backgroundColor: [
+            '#374151',  // Charcoal
+            '#9ca3af'   // Grey
+          ],
+          borderColor: [
+            '#111827',
+            '#4b5563'
+          ],
+          borderWidth: 1.5,
+          borderRadius: 8,
+          barThickness: 50
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            beginAtZero: true,
+            grid: { color: '#e5e7eb' },
+            ticks: { color: '#4b5563', font: { size: 10 } }
+          },
+          y: {
+            grid: { display: false },
+            ticks: { color: '#111111', font: { family: 'Outfit', size: 14, weight: 'bold' } }
+          }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
