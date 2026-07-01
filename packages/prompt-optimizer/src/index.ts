@@ -121,8 +121,10 @@ export class PromptOptimizer {
       optimized = optimized.replace(item.pattern, item.replacement);
     }
 
-    // Clean up double spaces or trailing newlines left over from replacements
-    optimized = optimized.replace(/\s\s+/g, ' ').trim();
+    // Clean up double spaces left over from replacements without destroying newlines
+    optimized = optimized.replace(/ {2,}/g, ' ');
+    // Collapse 3+ newlines into double newlines to save tokens without losing paragraph structure
+    optimized = optimized.replace(/\n{3,}/g, '\n\n').trim();
 
     const optimizedTokens = countTokens(optimized, model);
     const tokensSaved = Math.max(0, originalTokens - optimizedTokens);
@@ -136,3 +138,5 @@ export class PromptOptimizer {
     };
   }
 }
+
+export * from './tools';

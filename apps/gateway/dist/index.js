@@ -166,6 +166,10 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             const opt = promptOptimizer.optimize(newText, model);
             newText = opt.optimizedText;
         }
+        else if (cleanMsg.role === 'tool') {
+            // OpenAI tool response payload crushing
+            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
+        }
         if (typeof origMsg.content === 'string') {
             origMsg.content = newText;
         }
@@ -191,6 +195,21 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             else if (newText) {
                 origMsg.content.push({ type: 'text', text: newText });
             }
+            // Anthropic tool_result payload crushing
+            origMsg.content.forEach((b) => {
+                if (b.type === 'tool_result') {
+                    if (typeof b.content === 'string') {
+                        b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+                    }
+                    else if (Array.isArray(b.content)) {
+                        b.content.forEach((part) => {
+                            if (part.type === 'text' && typeof part.text === 'string') {
+                                part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                            }
+                        });
+                    }
+                }
+            });
         }
     }
     return newMessages;
@@ -961,8 +980,16 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 });
             }
         }
+        finalRequest = { ...parsedRequest, messages: cleanMsgs };
         // Parse the fully optimized body back into a NormalizedRequest to count its exact tokens
         finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+        // Optimize tool schemas and expose tools via routing if tools are present
+        if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
+            finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
+            finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
+            // Re-parse to count final token savings accurately
+            finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+        }
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));

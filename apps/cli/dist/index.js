@@ -35956,10 +35956,194 @@ var require_dist10 = __commonJS({
   }
 });
 
+// ../../packages/prompt-optimizer/dist/tools.js
+var require_tools2 = __commonJS({
+  "../../packages/prompt-optimizer/dist/tools.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.ToolPayloadCrusher = exports2.ToolSchemaOptimizer = exports2.ToolRouter = void 0;
+    var estimators_1 = require_dist7();
+    var ToolRouter = class {
+      /**
+       * Drops irrelevant tools if the number of tools exceeds a threshold (e.g. 15).
+       * It uses lightweight keyword matching against the user's prompt.
+       */
+      static route(tools, messages) {
+        if (!tools || tools.length < 15)
+          return tools;
+        const recentContext = messages.filter((m) => m.role === "user" || m.role === "system").slice(-3).map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join(" ").toLowerCase();
+        return tools.filter((tool) => {
+          const name = tool.function?.name || tool.name || "";
+          if (["search", "read", "write", "execute", "bash", "run"].some((k) => name.toLowerCase().includes(k))) {
+            return true;
+          }
+          const toolKeywords = name.toLowerCase().split(/[_.-]/);
+          return toolKeywords.some((kw) => kw.length > 3 && recentContext.includes(kw));
+        });
+      }
+    };
+    exports2.ToolRouter = ToolRouter;
+    var ToolSchemaOptimizer = class {
+      /**
+       * Cleans up tautological zero-information descriptions
+       */
+      static isTautological(name, description) {
+        if (!description || !name)
+          return false;
+        const desc = description.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const nm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (desc === nm || desc === `the${nm}`)
+          return true;
+        return false;
+      }
+      /**
+       * Truncates description to first sentence, preserving constraints.
+       */
+      static truncateDescription(desc, aggressive) {
+        if (!desc)
+          return desc;
+        if (/must|never|always|only|required|cannot|do not/i.test(desc)) {
+          return desc;
+        }
+        if (aggressive) {
+          const match = desc.match(/^.*?[.!?](?:\s|$)/);
+          if (match)
+            return match[0].trim();
+        }
+        return desc;
+      }
+      static optimizeSchemaNode(node, aggressive = false) {
+        if (!node || typeof node !== "object")
+          return;
+        if (node.properties) {
+          for (const [key, prop] of Object.entries(node.properties)) {
+            if (prop.description) {
+              if (this.isTautological(key, prop.description)) {
+                delete prop.description;
+              } else {
+                prop.description = this.truncateDescription(prop.description, aggressive);
+              }
+            }
+            this.optimizeSchemaNode(prop, aggressive);
+          }
+        }
+        if (node.items) {
+          this.optimizeSchemaNode(node.items, aggressive);
+        }
+      }
+      static optimize(tools, aggressive = false) {
+        if (!tools || !Array.isArray(tools))
+          return tools;
+        const newTools = JSON.parse(JSON.stringify(tools));
+        for (const tool of newTools) {
+          const func = tool.function || tool;
+          if (func.description) {
+            func.description = this.truncateDescription(func.description, aggressive);
+          }
+          if (func.parameters) {
+            this.optimizeSchemaNode(func.parameters, aggressive);
+          } else if (func.input_schema) {
+            this.optimizeSchemaNode(func.input_schema, aggressive);
+          }
+        }
+        return newTools;
+      }
+    };
+    exports2.ToolSchemaOptimizer = ToolSchemaOptimizer;
+    var ToolPayloadCrusher = class {
+      /**
+       * Detects if an array is highly heterogeneous by checking keys of first few items
+       */
+      static isHeterogeneous(arr) {
+        if (arr.length < 5)
+          return false;
+        const keySets = arr.slice(0, 5).map((item) => {
+          if (typeof item === "object" && item !== null) {
+            return Object.keys(item).sort().join(",");
+          }
+          return typeof item;
+        });
+        const firstKeys = keySets[0];
+        return keySets.some((keys) => keys !== firstKeys);
+      }
+      static crushArray(arr, maxItems, maxTokens, model) {
+        if (arr.length <= maxItems) {
+          const tokenCount = (0, estimators_1.countTokens)(JSON.stringify(arr), model);
+          if (tokenCount <= maxTokens)
+            return arr;
+        }
+        if (this.isHeterogeneous(arr)) {
+          return arr;
+        }
+        const keepCount = Math.min(arr.length, maxItems);
+        const headCount = Math.floor(keepCount / 2);
+        const tailCount = keepCount - headCount;
+        const head = arr.slice(0, headCount);
+        const tail = arr.slice(arr.length - tailCount);
+        const truncatedCount = arr.length - keepCount;
+        const metadataNode = `... [TokenWall: ${truncatedCount} items truncated for context optimization] ...`;
+        const candidate = [...head, metadataNode, ...tail];
+        const candidateTokens = (0, estimators_1.countTokens)(JSON.stringify(candidate), model);
+        if (candidateTokens <= maxTokens) {
+          return candidate;
+        }
+        let currentTokens = (0, estimators_1.countTokens)(JSON.stringify([metadataNode]), model);
+        const aggressiveHead = [];
+        for (const item of arr) {
+          const itemTokens = (0, estimators_1.countTokens)(JSON.stringify(item), model);
+          if (currentTokens + itemTokens > maxTokens)
+            break;
+          aggressiveHead.push(item);
+          currentTokens += itemTokens;
+        }
+        return [...aggressiveHead, metadataNode];
+      }
+      static optimizeToolResult(content, model) {
+        try {
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed) && parsed.length > 5) {
+            const crushed = this.crushArray(parsed, 50, 1500, model);
+            return JSON.stringify(crushed);
+          } else if (typeof parsed === "object" && parsed !== null) {
+            let mutated = false;
+            for (const [key, val] of Object.entries(parsed)) {
+              if (Array.isArray(val) && val.length > 5) {
+                parsed[key] = this.crushArray(val, 50, 1500, model);
+                mutated = true;
+              }
+            }
+            if (mutated)
+              return JSON.stringify(parsed);
+          }
+        } catch (e) {
+        }
+        return content;
+      }
+    };
+    exports2.ToolPayloadCrusher = ToolPayloadCrusher;
+  }
+});
+
 // ../../packages/prompt-optimizer/dist/index.js
 var require_dist11 = __commonJS({
   "../../packages/prompt-optimizer/dist/index.js"(exports2) {
     "use strict";
+    var __createBinding = exports2 && exports2.__createBinding || (Object.create ? (function(o, m, k, k2) {
+      if (k2 === void 0) k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
+    }) : (function(o, m, k, k2) {
+      if (k2 === void 0) k2 = k;
+      o[k2] = m[k];
+    }));
+    var __exportStar = exports2 && exports2.__exportStar || function(m, exports3) {
+      for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
+    };
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.PromptOptimizer = void 0;
     var estimators_1 = require_dist7();
@@ -36079,7 +36263,8 @@ ${JSON.stringify(JSON.parse(jsonString))}
         for (const item of CONVERSATIONAL_FILLERS) {
           optimized = optimized.replace(item.pattern, item.replacement);
         }
-        optimized = optimized.replace(/\s\s+/g, " ").trim();
+        optimized = optimized.replace(/ {2,}/g, " ");
+        optimized = optimized.replace(/\n{3,}/g, "\n\n").trim();
         const optimizedTokens = (0, estimators_1.countTokens)(optimized, model);
         const tokensSaved = Math.max(0, originalTokens - optimizedTokens);
         const savingsPercent = originalTokens > 0 ? Math.round(tokensSaved / originalTokens * 100) : 0;
@@ -36092,6 +36277,7 @@ ${JSON.stringify(JSON.parse(jsonString))}
       }
     };
     exports2.PromptOptimizer = PromptOptimizer;
+    __exportStar(require_tools2(), exports2);
   }
 });
 
@@ -46489,6 +46675,8 @@ var require_dist16 = __commonJS({
         if (cleanMsg.role === "user" || cleanMsg.role === "system") {
           const opt = promptOptimizer.optimize(newText, model);
           newText = opt.optimizedText;
+        } else if (cleanMsg.role === "tool") {
+          newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
         }
         if (typeof origMsg.content === "string") {
           origMsg.content = newText;
@@ -46513,6 +46701,19 @@ var require_dist16 = __commonJS({
           } else if (newText) {
             origMsg.content.push({ type: "text", text: newText });
           }
+          origMsg.content.forEach((b) => {
+            if (b.type === "tool_result") {
+              if (typeof b.content === "string") {
+                b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+              } else if (Array.isArray(b.content)) {
+                b.content.forEach((part) => {
+                  if (part.type === "text" && typeof part.text === "string") {
+                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                  }
+                });
+              }
+            }
+          });
         }
       }
       return newMessages;
@@ -47218,7 +47419,13 @@ ${steeringMsg}`;
             });
           }
         }
+        finalRequest = { ...parsedRequest, messages: cleanMsgs };
         finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+        if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
+          finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
+          finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false);
+          finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+        }
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`\u2714 Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));

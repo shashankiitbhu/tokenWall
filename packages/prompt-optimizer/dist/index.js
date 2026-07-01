@@ -1,4 +1,18 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PromptOptimizer = void 0;
 const estimators_1 = require("@tokenwall/estimators");
@@ -122,8 +136,10 @@ class PromptOptimizer {
         for (const item of CONVERSATIONAL_FILLERS) {
             optimized = optimized.replace(item.pattern, item.replacement);
         }
-        // Clean up double spaces or trailing newlines left over from replacements
-        optimized = optimized.replace(/\s\s+/g, ' ').trim();
+        // Clean up double spaces left over from replacements without destroying newlines
+        optimized = optimized.replace(/ {2,}/g, ' ');
+        // Collapse 3+ newlines into double newlines to save tokens without losing paragraph structure
+        optimized = optimized.replace(/\n{3,}/g, '\n\n').trim();
         const optimizedTokens = (0, estimators_1.countTokens)(optimized, model);
         const tokensSaved = Math.max(0, originalTokens - optimizedTokens);
         const savingsPercent = originalTokens > 0 ? Math.round((tokensSaved / originalTokens) * 100) : 0;
@@ -136,3 +152,4 @@ class PromptOptimizer {
     }
 }
 exports.PromptOptimizer = PromptOptimizer;
+__exportStar(require("./tools"), exports);

@@ -7,7 +7,7 @@ import { calculatePreFlightEstimation, getPricingForModel, countTokens } from '@
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
 import { ContextAnalyzer } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
-import { PromptOptimizer } from '@tokenwall/prompt-optimizer';
+import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter } from '@tokenwall/prompt-optimizer';
 import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
@@ -178,6 +178,9 @@ function getOptimizedMessages(
     if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       const opt = promptOptimizer.optimize(newText, model);
       newText = opt.optimizedText;
+    } else if (cleanMsg.role === 'tool') {
+      // OpenAI tool response payload crushing
+      newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
     }
 
     if (typeof origMsg.content === 'string') {
@@ -203,6 +206,21 @@ function getOptimizedMessages(
       } else if (newText) {
         origMsg.content.push({ type: 'text', text: newText });
       }
+      
+      // Anthropic tool_result payload crushing
+      origMsg.content.forEach((b: any) => {
+        if (b.type === 'tool_result') {
+          if (typeof b.content === 'string') {
+            b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model);
+          } else if (Array.isArray(b.content)) {
+            b.content.forEach((part: any) => {
+              if (part.type === 'text' && typeof part.text === 'string') {
+                part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model);
+              }
+            });
+          }
+        }
+      });
     }
   }
 
@@ -1027,8 +1045,18 @@ async function handleInterception(
         });
       }
     }
+    finalRequest = { ...parsedRequest, messages: cleanMsgs };
+    
     // Parse the fully optimized body back into a NormalizedRequest to count its exact tokens
     finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+    
+    // Optimize tool schemas and expose tools via routing if tools are present
+    if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
+      finalRequestBody.tools = ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
+      finalRequestBody.tools = ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
+      // Re-parse to count final token savings accurately
+      finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+    }
     
     const optimizedEstimation = calculatePreFlightEstimation(finalRequest);
     savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
