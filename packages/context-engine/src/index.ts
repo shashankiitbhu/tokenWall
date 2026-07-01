@@ -2,6 +2,9 @@ import { NormalizedRequest } from '@tokenwall/providers';
 import { TokenWallConfig } from '@tokenwall/core';
 import { countTokens } from '@tokenwall/estimators';
 import * as swc from '@swc/core';
+import { CacheAlignerPipeline } from './cache-aligner';
+
+export * from './cache-aligner';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -116,49 +119,7 @@ export class CodeCompressor {
   }
 }
 
-export class CacheAligner {
-  static normalizeWhitespace(text: string): string {
-    return text
-      .split(/\r?\n/)
-      .map(line => line.replace(/[ \t]+/g, ' ').trim())
-      .filter((line, i, arr) => {
-        if (line === '') {
-          return i > 0 && arr[i - 1].trim() !== '';
-        }
-        return true;
-      })
-      .join('\n')
-      .trim();
-  }
-
-  static detectVolatileTokens(text: string): { type: string; value: string }[] {
-    const findings: { type: string; value: string }[] = [];
-    const tokens = text.split(/[\s'"\[\](){},;]+/);
-
-    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-    const hexHashRegex = /^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$/;
-    const jwtRegex = /^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
-    const iso8601Regex = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
-
-    for (let token of tokens) {
-      if (!token) continue;
-      token = token.replace(/[.,:;?!]+$/, '');
-      if (uuidRegex.test(token)) {
-        findings.push({ type: 'uuid', value: token });
-      } else if (iso8601Regex.test(token)) {
-        findings.push({ type: 'iso8601', value: token });
-      } else if (jwtRegex.test(token)) {
-        const parts = token.split('.');
-        if (parts[0].length >= 4 && parts[1].length >= 4 && parts[2].length >= 4) {
-          findings.push({ type: 'jwt', value: token });
-        }
-      } else if (hexHashRegex.test(token)) {
-        findings.push({ type: 'hex_hash', value: token });
-      }
-    }
-    return findings;
-  }
-}
+// Replaced by ./cache-aligner.ts
 
 export class ContextAnalyzer {
   async analyze(req: NormalizedRequest, config?: TokenWallConfig): Promise<ContextReport> {
@@ -175,20 +136,24 @@ export class ContextAnalyzer {
 
       // 0. Cache alignment detection & normalization
       if ((msg.role === 'system' || i === 0) && config?.cacheAlignment !== false) {
-        const normalized = CacheAligner.normalizeWhitespace(content);
-        if (normalized !== content) {
-          content = normalized;
+        const pipeline = new CacheAlignerPipeline();
+        const alignResult = pipeline.align(content, msg.role, msg.role === 'system', config);
+        
+        if (alignResult.prompt !== content) {
+          content = alignResult.prompt;
         }
-        const volatile = CacheAligner.detectVolatileTokens(content);
-        if (volatile.length > 0) {
-          for (const finding of volatile) {
-            inefficiencies.push({
-              type: 'volatile_prefix',
-              description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. This prevents provider-side prefix caching and increases latency/costs.`,
-              target: finding.value,
-              approximateTokens: countTokens(finding.value, req.model),
-              potentialSavingsPercent: 50
-            });
+        
+        if (alignResult.findings.length > 0) {
+          for (const finding of alignResult.findings) {
+            if (finding.type !== 'fingerprint') {
+              inefficiencies.push({
+                type: 'volatile_prefix',
+                description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. Cacheability Score: ${alignResult.cacheabilityScore}/100.`,
+                target: finding.value,
+                approximateTokens: countTokens(finding.value, req.model),
+                potentialSavingsPercent: 50
+              });
+            }
           }
         }
       }
