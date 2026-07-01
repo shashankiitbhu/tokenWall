@@ -22,6 +22,9 @@ export interface TokenWallConfig {
     jsonCrushing?: boolean;
     codeCompression?: boolean;
     cacheAlignment?: boolean;
+    importance?: {
+        policy: 'conservative' | 'balanced' | 'aggressive';
+    };
 }
 export declare class ConfigManager {
     private configPath;

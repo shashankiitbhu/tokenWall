@@ -1,7 +1,50 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ContextAnalyzer = exports.CacheAligner = exports.CodeCompressor = exports.JsonCrusher = void 0;
+exports.ContextWindowManager = exports.ContextAnalyzer = exports.CodeCompressor = exports.JsonCrusher = void 0;
 const estimators_1 = require("@tokenwall/estimators");
+const swc = __importStar(require("@swc/core"));
+const cache_aligner_1 = require("./cache-aligner");
+__exportStar(require("./cache-aligner"), exports);
+__exportStar(require("./importance"), exports);
+__exportStar(require("./query-analyzer"), exports);
+const query_analyzer_1 = require("./query-analyzer");
+const importance_1 = require("./importance");
 let _magikaInstance = null;
 async function getMagika() {
     if (!_magikaInstance) {
@@ -66,90 +109,82 @@ class JsonCrusher {
 }
 exports.JsonCrusher = JsonCrusher;
 class CodeCompressor {
-    static compress(code) {
+    static compress(code, lang, queryKeywords) {
+        // Query-Aware Check: If the code contains one of the user's high-priority keywords,
+        // we perform a "light" compression (preserving comments) to retain context.
+        if (queryKeywords && queryKeywords.length > 0) {
+            const lowerCode = code.toLowerCase();
+            const hasMatch = queryKeywords.some(kw => lowerCode.includes(kw));
+            if (hasMatch) {
+                // Light compression: just trim excessive whitespace/newlines, keep comments
+                return code.replace(/\n{3,}/g, '\n\n').trim();
+            }
+        }
+        if (lang) {
+            const lower = lang.toLowerCase();
+            if (['javascript', 'typescript', 'js', 'ts'].includes(lower)) {
+                try {
+                    const isTs = lower.includes('ts');
+                    const ast = swc.parseSync(code, {
+                        syntax: isTs ? 'typescript' : 'ecmascript',
+                        comments: false,
+                        target: 'esnext'
+                    });
+                    const result = swc.printSync(ast, {
+                        minify: true,
+                        isModule: true,
+                        sourceMaps: false
+                    });
+                    return result.code.trim();
+                }
+                catch (e) {
+                    // Fall back to regex if SWC fails to parse (e.g. invalid syntax snippet)
+                }
+            }
+        }
         // Strip block comments (/* ... */)
         let compressed = code.replace(/\/\*[\s\S]*?\*\//g, '');
         // Strip single-line comments (// ...) but avoid stripping URL schemes
         compressed = compressed.replace(/(?<!:)\/\/.*$/gm, '');
         // Strip Python/Bash comments (# ...) but avoid stripping string boundaries
         compressed = compressed.replace(/(?<!["'`])#.*$/gm, '');
-        // Collapse multiple empty lines
-        compressed = compressed.replace(/\n\s*\n/g, '\n');
-        return compressed.trim();
+        // Strip excessive newlines and spaces
+        compressed = compressed.replace(/\n\s*\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+        return compressed;
     }
 }
 exports.CodeCompressor = CodeCompressor;
-class CacheAligner {
-    static normalizeWhitespace(text) {
-        return text
-            .split(/\r?\n/)
-            .map(line => line.replace(/[ \t]+/g, ' ').trim())
-            .filter((line, i, arr) => {
-            if (line === '') {
-                return i > 0 && arr[i - 1].trim() !== '';
-            }
-            return true;
-        })
-            .join('\n')
-            .trim();
-    }
-    static detectVolatileTokens(text) {
-        const findings = [];
-        const tokens = text.split(/[\s'"\[\](){},;]+/);
-        const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-        const hexHashRegex = /^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$/;
-        const jwtRegex = /^[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/;
-        const iso8601Regex = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
-        for (let token of tokens) {
-            if (!token)
-                continue;
-            token = token.replace(/[.,:;?!]+$/, '');
-            if (uuidRegex.test(token)) {
-                findings.push({ type: 'uuid', value: token });
-            }
-            else if (iso8601Regex.test(token)) {
-                findings.push({ type: 'iso8601', value: token });
-            }
-            else if (jwtRegex.test(token)) {
-                const parts = token.split('.');
-                if (parts[0].length >= 4 && parts[1].length >= 4 && parts[2].length >= 4) {
-                    findings.push({ type: 'jwt', value: token });
-                }
-            }
-            else if (hexHashRegex.test(token)) {
-                findings.push({ type: 'hex_hash', value: token });
-            }
-        }
-        return findings;
-    }
-}
-exports.CacheAligner = CacheAligner;
+// Replaced by ./cache-aligner.ts
 class ContextAnalyzer {
     async analyze(req, config) {
         const inefficiencies = [];
         let totalWasteTokens = 0;
         const cleanMessages = JSON.parse(JSON.stringify(req.messages));
         const cachedContents = [];
+        // Stage 5: Query-Aware Extraction
+        const queryKeywords = query_analyzer_1.QueryAnalyzer.extractFromMessages(cleanMessages);
         const isReversible = config?.reversibleCompression !== false;
         for (let i = 0; i < cleanMessages.length; i++) {
             const msg = cleanMessages[i];
             let content = msg.content;
             // 0. Cache alignment detection & normalization
             if ((msg.role === 'system' || i === 0) && config?.cacheAlignment !== false) {
-                const normalized = CacheAligner.normalizeWhitespace(content);
-                if (normalized !== content) {
-                    content = normalized;
+                const pipeline = new cache_aligner_1.CacheAlignerPipeline();
+                const alignResult = pipeline.align(content, msg.role, msg.role === 'system', config);
+                if (alignResult.prompt !== content) {
+                    content = alignResult.prompt;
                 }
-                const volatile = CacheAligner.detectVolatileTokens(content);
-                if (volatile.length > 0) {
-                    for (const finding of volatile) {
-                        inefficiencies.push({
-                            type: 'volatile_prefix',
-                            description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. This prevents provider-side prefix caching and increases latency/costs.`,
-                            target: finding.value,
-                            approximateTokens: (0, estimators_1.countTokens)(finding.value, req.model),
-                            potentialSavingsPercent: 50
-                        });
+                if (alignResult.findings.length > 0) {
+                    for (const finding of alignResult.findings) {
+                        if (finding.type !== 'fingerprint') {
+                            inefficiencies.push({
+                                type: 'volatile_prefix',
+                                description: `Volatile content format (${finding.type}) detected in system prompt: '${finding.value.substring(0, 10)}...'. Cacheability Score: ${alignResult.cacheabilityScore}/100.`,
+                                target: finding.value,
+                                approximateTokens: (0, estimators_1.countTokens)(finding.value, req.model),
+                                potentialSavingsPercent: 50
+                            });
+                        }
                     }
                 }
             }
@@ -230,6 +265,31 @@ class ContextAnalyzer {
                     totalWasteTokens += saved;
                 }
             }
+            // 3.5 Unstructured Log Pruning via Importance Scoring
+            if (config?.importance?.policy && config.importance.policy !== 'conservative' && content.length > 1000) {
+                // Only target blocks that look like unstructured logs (lots of lines, not JSON/Code blocks)
+                const linesCount = content.split('\n').length;
+                if (linesCount > 20 && !content.trim().startsWith('```') && !content.trim().startsWith('{') && !content.trim().startsWith('[')) {
+                    const importanceEngine = new importance_1.ImportanceEngine();
+                    const beforeTokens = (0, estimators_1.countTokens)(content, req.model);
+                    const prunedContent = importanceEngine.pruneLogBlock(content, config.importance.policy);
+                    if (prunedContent.length < content.length) {
+                        const afterTokens = (0, estimators_1.countTokens)(prunedContent, req.model);
+                        const saved = Math.max(0, beforeTokens - afterTokens);
+                        if (saved > 10) {
+                            inefficiencies.push({
+                                type: 'logs',
+                                description: `Unstructured log block pruned using '${config.importance.policy}' Importance Policy. Preserved errors/warnings, dropped noise.`,
+                                target: 'unstructured_log_block',
+                                approximateTokens: saved,
+                                potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
+                            });
+                            totalWasteTokens += saved;
+                            content = prunedContent;
+                        }
+                    }
+                }
+            }
             // 4. Binary/Base64 payloads
             const base64Regex = /([A-Za-z0-9+/]{100,})/g;
             if (base64Regex.test(content)) {
@@ -280,7 +340,7 @@ class ContextAnalyzer {
                             }
                         }
                         else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label)) {
-                            const compressed = CodeCompressor.compress(content);
+                            const compressed = CodeCompressor.compress(content, label, queryKeywords);
                             const saved = (0, estimators_1.countTokens)(content, req.model) - (0, estimators_1.countTokens)(compressed, req.model);
                             if (saved > 0) {
                                 totalWasteTokens += saved;
@@ -334,7 +394,7 @@ class ContextAnalyzer {
                     const lang = codeMatch[1];
                     const rawCode = codeMatch[2];
                     if (rawCode.length > 300) {
-                        const compressedCode = CodeCompressor.compress(rawCode);
+                        const compressedCode = CodeCompressor.compress(rawCode, lang, queryKeywords);
                         let newBlock = '';
                         let id = '';
                         if (isReversible) {
@@ -366,12 +426,127 @@ class ContextAnalyzer {
             }
             msg.content = content;
         }
+        // 8. Apply Rolling Context Window
+        const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model, undefined, config);
+        for (const warning of windowResult.warnings) {
+            inefficiencies.push({
+                type: 'logs',
+                description: warning,
+                target: 'ContextWindow',
+                approximateTokens: 0,
+                potentialSavingsPercent: 100
+            });
+        }
         return {
             inefficiencies,
             totalWasteTokens,
-            cleanMessages,
-            cachedContents
+            cachedContents,
+            cleanMessages: windowResult.messages,
+            autoOptimized: !!config?.autoOptimize
         };
     }
 }
 exports.ContextAnalyzer = ContextAnalyzer;
+const MODEL_LIMITS = {
+    'gpt-4o': 128000,
+    'gpt-4o-mini': 128000,
+    'gpt-4-turbo': 128000,
+    'claude-3-opus': 200000,
+    'claude-3-5-sonnet': 200000,
+    'claude-3-haiku': 200000,
+    'gemini-1.5-pro': 2000000,
+    'gemini-1.5-flash': 1000000,
+};
+class ContextWindowManager {
+    static getLimitForModel(model) {
+        for (const [key, limit] of Object.entries(MODEL_LIMITS)) {
+            if (model.toLowerCase().includes(key)) {
+                return limit;
+            }
+        }
+        return 128000; // Safe default
+    }
+    static fitToBudget(messages, model, explicitBudget, config) {
+        if (!messages || messages.length <= 2)
+            return { messages, warnings: [] };
+        const totalLimit = explicitBudget || this.getLimitForModel(model);
+        const softLimit = totalLimit * 0.8;
+        const lightPruneLimit = totalLimit * 0.95;
+        const rollingLimit = totalLimit * 1.0;
+        const aggressiveLimit = totalLimit * 1.1;
+        let currentTokens = 0;
+        const tokenCounts = messages.map(m => {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            const count = (0, estimators_1.countTokens)(content, model);
+            currentTokens += count;
+            return count;
+        });
+        const warnings = [];
+        if (currentTokens < softLimit) {
+            return { messages, warnings };
+        }
+        warnings.push(`[TokenWall] Context size (${currentTokens} tokens) exceeded soft budget (${softLimit} tokens).`);
+        let prunedMessages = JSON.parse(JSON.stringify(messages));
+        const systemIndices = prunedMessages.map((m, i) => m.role === 'system' ? i : -1).filter((i) => i !== -1);
+        const lastUserIndex = prunedMessages.map((m, i) => m.role === 'user' ? i : -1).reverse()[0];
+        const preserveIndices = new Set([...systemIndices]);
+        if (lastUserIndex !== undefined)
+            preserveIndices.add(lastUserIndex);
+        const importanceEngine = new importance_1.ImportanceEngine();
+        const policy = config?.importance?.policy || 'balanced';
+        const threshold = importance_1.ImportanceEngine.getThresholdForPolicy(policy);
+        const messageScores = prunedMessages.map((m) => {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            // We take the average score of all lines in the message
+            const lines = content.split('\n');
+            if (lines.length === 0)
+                return 0.5;
+            let total = 0;
+            for (const line of lines) {
+                total += importanceEngine.scoreLine(line, { isLog: false, isCodeBlock: false, isStructuredData: false });
+            }
+            return total / lines.length;
+        });
+        // Light Pruning: drop messages below importance threshold or if they are huge old outputs
+        if (currentTokens >= lightPruneLimit) {
+            warnings.push(`[TokenWall] Light pruning activated. Dropping low-importance / huge old outputs.`);
+            for (let i = 0; i < prunedMessages.length; i++) {
+                const isHuge = tokenCounts[i] > 2000 && i < prunedMessages.length - 3;
+                const isLowImportance = messageScores[i] < threshold;
+                if (!preserveIndices.has(i) && (isHuge || isLowImportance)) {
+                    prunedMessages[i].content = isLowImportance ? '[TokenWall: Low-importance message pruned]' : '[TokenWall: Old huge context pruned]';
+                    currentTokens -= tokenCounts[i];
+                    tokenCounts[i] = 10;
+                }
+            }
+        }
+        // Rolling Window
+        if (currentTokens >= rollingLimit) {
+            warnings.push(`[TokenWall] Rolling window activated. Dropping oldest messages.`);
+            for (let i = 0; i < prunedMessages.length; i++) {
+                if (currentTokens <= rollingLimit)
+                    break;
+                if (!preserveIndices.has(i) && prunedMessages[i].content !== '[TokenWall: Old huge context pruned]') {
+                    prunedMessages[i].content = '[TokenWall: Old message evicted to fit budget]';
+                    currentTokens -= tokenCounts[i];
+                    tokenCounts[i] = 10;
+                }
+            }
+        }
+        // Aggressive Pruning
+        if (currentTokens >= aggressiveLimit) {
+            warnings.push(`[TokenWall] Aggressive pruning activated. Preserving only system and recent context.`);
+            for (let i = 0; i < prunedMessages.length; i++) {
+                if (currentTokens <= totalLimit)
+                    break;
+                if (!preserveIndices.has(i)) {
+                    prunedMessages[i].content = '[TokenWall: Aggressively evicted]';
+                    currentTokens -= tokenCounts[i];
+                    tokenCounts[i] = 5;
+                }
+            }
+        }
+        return { messages: prunedMessages, warnings };
+    }
+}
+exports.ContextWindowManager = ContextWindowManager;

@@ -38,7 +38,10 @@ const DEFAULT_CONFIG = {
     verbositySteering: true,
     jsonCrushing: true,
     codeCompression: true,
-    cacheAlignment: true
+    cacheAlignment: true,
+    importance: {
+        policy: 'balanced'
+    }
 };
 class ConfigManager {
     configPath;

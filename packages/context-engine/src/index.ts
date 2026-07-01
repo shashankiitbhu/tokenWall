@@ -9,6 +9,7 @@ export * from './importance';
 export * from './query-analyzer';
 
 import { QueryAnalyzer } from './query-analyzer';
+import { ImportanceEngine } from './importance';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -23,6 +24,7 @@ export interface ContextReport {
   totalWasteTokens: number;
   cleanMessages: NormalizedRequest['messages'];
   cachedContents: { id: string; content: string }[];
+  autoOptimized?: boolean;
 }
 
 let _magikaInstance: any = null;
@@ -430,6 +432,10 @@ export class ContextAnalyzer {
                 cachedContents.push({ id, content: rawCode });
               }
               content = content.replace(codeMatch[0], newBlock);
+            }
+          }
+        }
+      }
       msg.content = content;
     }
 
@@ -438,9 +444,10 @@ export class ContextAnalyzer {
     for (const warning of windowResult.warnings) {
       inefficiencies.push({
         type: 'logs',
+        description: warning,
         target: 'ContextWindow',
-        tokensSaved: 0,
-        suggestion: warning
+        approximateTokens: 0,
+        potentialSavingsPercent: 100
       });
     }
 

@@ -19,9 +19,10 @@ export declare class ToolSchemaOptimizer {
 }
 export declare class ToolPayloadCrusher {
     /**
-     * Detects if an array is highly heterogeneous by checking keys of first few items
+     * Detects if an array is homogeneous (objects with identical keys and primitive values)
      */
-    static isHeterogeneous(arr: any[]): boolean;
+    static isHomogeneous(arr: any[]): boolean;
+    static convertToCSV(arr: any[]): string;
     static crushArray(arr: any[], maxItems: number, maxTokens: number, model: string): any[];
     static optimizeToolResult(content: string, model: string): string;
 }

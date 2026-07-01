@@ -1,16 +1,16 @@
 export * from './types';
 export * from './detectors';
 
-import { TieredDetector, KeywordDetector, StructureDetector, ImportanceContext, ImportancePolicy } from './types';
-import { KeywordDetector as KD, StructureDetector as SD, TieredDetector as TD } from './detectors';
+import { ImportanceContext, ImportancePolicy } from './types';
+import { KeywordDetector, StructureDetector, TieredDetector } from './detectors';
 
 export class ImportanceEngine {
   private detector: TieredDetector;
 
   constructor() {
-    this.detector = new TD([
-      new KD(),
-      new SD()
+    this.detector = new TieredDetector([
+      new KeywordDetector(),
+      new StructureDetector()
     ]);
   }
 

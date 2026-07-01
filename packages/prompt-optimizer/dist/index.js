@@ -60,78 +60,79 @@ const CONVERSATIONAL_FILLERS = [
     { pattern: /kindly help me with/gi, replacement: 'resolve' }
 ];
 function minifyJsonBlocks(text) {
-    let result = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+    return text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
         try {
-            return `\`\`\`json\n${JSON.stringify(JSON.parse(jsonString))}\n\`\`\``;
+            const parsed = JSON.parse(jsonString);
+            const walk = (obj) => {
+                if (Array.isArray(obj)) {
+                    // Array compression
+                    if (obj.length > 50) {
+                        return [
+                            walk(obj[0]),
+                            walk(obj[1]),
+                            walk(obj[2]),
+                            `... [TokenWall: ${obj.length - 3} more items truncated]`
+                        ];
+                    }
+                    return obj.map(walk);
+                }
+                else if (obj && typeof obj === 'object') {
+                    const newObj = {};
+                    for (const key of Object.keys(obj)) {
+                        newObj[key] = walk(obj[key]);
+                    }
+                    return newObj;
+                }
+                return obj;
+            };
+            // JSON.stringify inherently removes all redundant whitespace
+            return `\`\`\`json\n${JSON.stringify(walk(parsed))}\n\`\`\``;
         }
         catch {
             return match;
         }
     });
-    let out = '';
-    let i = 0;
-    while (i < result.length) {
-        let c = result[i];
-        if ((c === '{' || c === '[') && (i === 0 || /\s/.test(result[i - 1]))) {
-            let braceCount = 0;
-            let inString = false;
-            let escape = false;
-            let j = i;
-            for (; j < result.length; j++) {
-                let char = result[j];
-                if (inString) {
-                    if (escape)
-                        escape = false;
-                    else if (char === '\\')
-                        escape = true;
-                    else if (char === '"')
-                        inString = false;
-                }
-                else {
-                    if (char === '"')
-                        inString = true;
-                    else if (char === '{' || char === '[')
-                        braceCount++;
-                    else if (char === '}' || char === ']') {
-                        braceCount--;
-                        if (braceCount === 0) {
-                            let block = result.substring(i, j + 1);
-                            try {
-                                let parsed = JSON.parse(block);
-                                if (block.length > 50) {
-                                    let minified = JSON.stringify(parsed);
-                                    out += minified;
-                                    i = j + 1;
-                                    break;
-                                }
-                            }
-                            catch (e) { }
-                            break;
-                        }
-                    }
-                }
+}
+/**
+ * Context Deduplication:
+ * Based on concepts from open-source context engineering tools (like Headroom and SemHash),
+ * this function prunes redundant information (e.g., repeating logs or identical paragraphs).
+ * It splits the text into blocks separated by double newlines (`\n\n`), tracks seen blocks using a `Set`,
+ * and replaces large exact duplicate blocks with a placeholder to save waste tokens.
+ */
+function deduplicateContext(text) {
+    const blocks = text.split('\n\n');
+    const seen = new Set();
+    const output = [];
+    for (const block of blocks) {
+        const trimmed = block.trim();
+        // Only deduplicate blocks larger than a certain threshold
+        if (trimmed.length > 50) {
+            // Normalization: strip timestamps, UUIDs, hex hashes, and all numbers
+            const normalized = trimmed.toLowerCase()
+                .replace(/\d{4}-\d{2}-\d{2}[t\s]\d{2}:\d{2}:\d{2}(\.\d+)?z?/g, '') // ISO timestamps
+                .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '') // UUIDs
+                .replace(/\b[0-9a-f]{8,}\b/gi, '') // Hex hashes
+                .replace(/\b\d+\b/g, '') // All remaining numbers
+                .trim();
+            if (seen.has(normalized)) {
+                // Replace with a marker instead of silently dropping
+                output.push(`[Duplicate content removed]`);
+                continue;
             }
-            if (braceCount === 0 && i !== j + 1) {
-                out += result[i];
-                i++;
-            }
-            else if (braceCount !== 0) {
-                out += result[i];
-                i++;
-            }
+            seen.add(normalized);
         }
-        else {
-            out += result[i];
-            i++;
-        }
+        output.push(block);
     }
-    return out;
+    return output.join('\n\n');
 }
 class PromptOptimizer {
     optimize(prompt, model) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         // First apply JSON minification
         let optimized = minifyJsonBlocks(prompt);
+        // Apply Context Deduplication
+        optimized = deduplicateContext(optimized);
         // Apply filler regexes
         for (const item of CONVERSATIONAL_FILLERS) {
             optimized = optimized.replace(item.pattern, item.replacement);
