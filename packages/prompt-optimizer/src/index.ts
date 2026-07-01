@@ -53,59 +53,36 @@ const CONVERSATIONAL_FILLERS = [
 ];
 
 function minifyJsonBlocks(text: string): string {
-  let result = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+  return text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
     try {
-      return `\`\`\`json\n${JSON.stringify(JSON.parse(jsonString))}\n\`\`\``;
+      const parsed = JSON.parse(jsonString);
+      const walk = (obj: any): any => {
+        if (Array.isArray(obj)) {
+          // Array compression
+          if (obj.length > 50) {
+            return [
+              walk(obj[0]),
+              walk(obj[1]),
+              walk(obj[2]),
+              `... [TokenWall: ${obj.length - 3} more items truncated]`
+            ];
+          }
+          return obj.map(walk);
+        } else if (obj && typeof obj === 'object') {
+          const newObj: any = {};
+          for (const key of Object.keys(obj)) {
+            newObj[key] = walk(obj[key]);
+          }
+          return newObj;
+        }
+        return obj;
+      };
+      // JSON.stringify inherently removes all redundant whitespace
+      return `\`\`\`json\n${JSON.stringify(walk(parsed))}\n\`\`\``;
     } catch {
       return match;
     }
   });
-
-  let out = '';
-  let i = 0;
-  while (i < result.length) {
-    let c = result[i];
-    if ((c === '{' || c === '[') && (i === 0 || /\s/.test(result[i-1]))) {
-      let braceCount = 0;
-      let inString = false;
-      let escape = false;
-      let j = i;
-      for (; j < result.length; j++) {
-        let char = result[j];
-        if (inString) {
-          if (escape) escape = false;
-          else if (char === '\\') escape = true;
-          else if (char === '"') inString = false;
-        } else {
-          if (char === '"') inString = true;
-          else if (char === '{' || char === '[') braceCount++;
-          else if (char === '}' || char === ']') {
-            braceCount--;
-            if (braceCount === 0) {
-              let block = result.substring(i, j + 1);
-              try {
-                let parsed = JSON.parse(block);
-                if (block.length > 50) {
-                  let minified = JSON.stringify(parsed);
-                  out += minified;
-                  i = j + 1;
-                  break;
-                }
-              } catch (e) {}
-              break;
-            }
-          }
-        }
-      }
-      if (braceCount === 0 && i !== j + 1) {
-        out += result[i]; i++;
-      } else if (braceCount !== 0) {
-        out += result[i]; i++;
-      }
-    } else {
-      out += result[i]; i++;
-    }
-  }
 }
 
 /**

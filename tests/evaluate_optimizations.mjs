@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { countTokens } from '../packages/estimators/dist/index.js';
 import { PromptOptimizer, ToolRouter, ToolSchemaOptimizer, ToolPayloadCrusher } from '../packages/prompt-optimizer/dist/index.js';
+import { ContextAnalyzer } from '../packages/context-engine/dist/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -253,6 +254,42 @@ for (let i = 0; i < 80; i++) {
 }
 const largeToolPayload = JSON.stringify(commits);
 
+const deduplicationMockData = `Running test suite...
+${'Error: Failed to fetch user profile from auth service, retrying...\\n  at fetchUserProfile (/app/src/auth.js:25:9)\\n  at processTicksAndRejections (internal/process/task_queues.js:97:5)\\n\\n'.repeat(15)}
+Test suite finished.`;
+
+const contextAnalyzerMockReq = {
+  provider: 'openai',
+  model: 'gpt-4o-mini',
+  stream: false,
+  messages: [
+    {
+      role: 'user',
+      content: `Please review my package lock dependencies:
+File: package-lock.json
+\`\`\`json
+"dependencies": {
+  "react": "^18.2.0",
+  "lodash": "^4.17.21"
+}
+\`\`\`
+And check this code:
+\`\`\`javascript
+// This function adds two numbers
+function add(a, b) {
+  /* Return the sum */
+  return a + b;
+}
+\`\`\`
+Here is some unstructured JSON payload:
+{
+  "key1": "value1",
+  "key2": "value2"
+}`
+    }
+  ]
+};
+
 // --- BENCHMARK EXECUTION ---
 
 async function runBenchmark() {
@@ -359,6 +396,47 @@ async function runBenchmark() {
       afterText: crushedPayload,
       beforeTokens: countTokens(largeToolPayload, model),
       afterTokens: countTokens(crushedPayload, model),
+      latencyMs: parseFloat(latency.toFixed(2))
+    });
+  }
+
+  // Case 6: Context Deduplication
+  {
+    const start = performance.now();
+    const optRes = optimizer.optimize(deduplicationMockData, model);
+    const latency = performance.now() - start;
+
+    results.push({
+      id: 'context_deduplication',
+      name: 'Context Deduplication',
+      description: 'Strips out exact duplicate chunks (e.g. repeated logs/stack traces) separated by double newlines.',
+      beforeText: deduplicationMockData,
+      afterText: optRes.optimizedText,
+      beforeTokens: countTokens(deduplicationMockData, model),
+      afterTokens: countTokens(optRes.optimizedText, model),
+      latencyMs: parseFloat(latency.toFixed(2))
+    });
+  }
+
+  // Case 7: Context Analyzer (Code Compression, JSON Crushing, Lockfiles)
+  {
+    const analyzer = new ContextAnalyzer();
+    const beforeTokens = countTokens(contextAnalyzerMockReq.messages[0].content, model);
+    
+    const start = performance.now();
+    const report = await analyzer.analyze(contextAnalyzerMockReq);
+    const latency = performance.now() - start;
+
+    const afterTokens = countTokens(report.cleanMessages[0].content, model);
+    
+    results.push({
+      id: 'context_analyzer',
+      name: 'Structural Context Analyzer',
+      description: 'Applies robust structure-aware compressions: JSON minification, code comment stripping, and reversible lockfile truncation.',
+      beforeText: contextAnalyzerMockReq.messages[0].content,
+      afterText: report.cleanMessages[0].content,
+      beforeTokens: beforeTokens,
+      afterTokens: afterTokens,
       latencyMs: parseFloat(latency.toFixed(2))
     });
   }

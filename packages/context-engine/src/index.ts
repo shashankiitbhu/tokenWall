@@ -1,6 +1,7 @@
 import { NormalizedRequest } from '@tokenwall/providers';
 import { TokenWallConfig } from '@tokenwall/core';
 import { countTokens } from '@tokenwall/estimators';
+import * as swc from '@swc/core';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -76,7 +77,29 @@ export class JsonCrusher {
 }
 
 export class CodeCompressor {
-  static compress(code: string): string {
+  static compress(code: string, lang?: string): string {
+    if (lang) {
+      const lower = lang.toLowerCase();
+      if (['javascript', 'typescript', 'js', 'ts'].includes(lower)) {
+        try {
+          const isTs = lower.includes('ts');
+          const ast = swc.parseSync(code, {
+            syntax: isTs ? 'typescript' : 'ecmascript',
+            comments: false,
+            target: 'esnext'
+          });
+          const result = swc.printSync(ast, {
+            minify: true,
+            isModule: true,
+            sourceMaps: false
+          });
+          return result.code.trim();
+        } catch (e) {
+          // Fall back to regex if SWC fails to parse (e.g. invalid syntax snippet)
+        }
+      }
+    }
+
     // Strip block comments (/* ... */)
     let compressed = code.replace(/\/\*[\s\S]*?\*\//g, '');
     
@@ -313,7 +336,7 @@ export class ContextAnalyzer {
                   });
                 }
              } else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label as string)) {
-                const compressed = CodeCompressor.compress(content);
+                const compressed = CodeCompressor.compress(content, label as string);
                 const saved = countTokens(content, req.model) - countTokens(compressed, req.model);
                 if (saved > 0) {
                   totalWasteTokens += saved;
@@ -370,7 +393,7 @@ export class ContextAnalyzer {
           const lang = codeMatch[1];
           const rawCode = codeMatch[2];
           if (rawCode.length > 300) {
-            const compressedCode = CodeCompressor.compress(rawCode);
+            const compressedCode = CodeCompressor.compress(rawCode, lang);
             
             let newBlock = '';
             let id = '';
