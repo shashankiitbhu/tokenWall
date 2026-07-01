@@ -99,11 +99,18 @@ function deduplicateContext(text: string): string {
 
   for (const block of blocks) {
     const trimmed = block.trim();
-    // Only deduplicate blocks larger than a certain threshold to avoid stripping common short phrases
+    // Only deduplicate blocks larger than a certain threshold
     if (trimmed.length > 50) {
-      const normalized = trimmed.toLowerCase();
+      // Normalization: strip timestamps, UUIDs, hex hashes, and all numbers
+      const normalized = trimmed.toLowerCase()
+        .replace(/\d{4}-\d{2}-\d{2}[t\s]\d{2}:\d{2}:\d{2}(\.\d+)?z?/g, '') // ISO timestamps
+        .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '') // UUIDs
+        .replace(/\b[0-9a-f]{8,}\b/gi, '') // Hex hashes
+        .replace(/\b\d+\b/g, '') // All remaining numbers
+        .trim();
+
       if (seen.has(normalized)) {
-        // Replace with a marker instead of silently dropping, so LLM knows something was here
+        // Replace with a marker instead of silently dropping
         output.push(`[Duplicate content removed]`);
         continue;
       }

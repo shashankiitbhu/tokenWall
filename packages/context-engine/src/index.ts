@@ -421,20 +421,122 @@ export class ContextAnalyzer {
                 cachedContents.push({ id, content: rawCode });
               }
               content = content.replace(codeMatch[0], newBlock);
-            }
-          }
-        }
-      }
-
       msg.content = content;
+    }
+
+    // 8. Apply Rolling Context Window
+    const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model);
+    for (const warning of windowResult.warnings) {
+      inefficiencies.push({
+        type: 'logs',
+        target: 'ContextWindow',
+        tokensSaved: 0,
+        suggestion: warning
+      });
     }
 
     return {
       inefficiencies,
       totalWasteTokens,
-      cleanMessages,
-      cachedContents
+      cachedContents,
+      cleanMessages: windowResult.messages,
+      autoOptimized: !!config?.autoOptimize
     };
   }
 }
 
+const MODEL_LIMITS: Record<string, number> = {
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-4-turbo': 128000,
+  'claude-3-opus': 200000,
+  'claude-3-5-sonnet': 200000,
+  'claude-3-haiku': 200000,
+  'gemini-1.5-pro': 2000000,
+  'gemini-1.5-flash': 1000000,
+};
+
+export class ContextWindowManager {
+  static getLimitForModel(model: string): number {
+    for (const [key, limit] of Object.entries(MODEL_LIMITS)) {
+      if (model.toLowerCase().includes(key)) {
+        return limit;
+      }
+    }
+    return 128000; // Safe default
+  }
+
+  static fitToBudget(messages: any[], model: string, explicitBudget?: number): { messages: any[], warnings: string[] } {
+    if (!messages || messages.length <= 2) return { messages, warnings: [] };
+
+    const totalLimit = explicitBudget || this.getLimitForModel(model);
+    const softLimit = totalLimit * 0.8;
+    const lightPruneLimit = totalLimit * 0.95;
+    const rollingLimit = totalLimit * 1.0;
+    const aggressiveLimit = totalLimit * 1.1;
+
+    let currentTokens = 0;
+    const tokenCounts = messages.map(m => {
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      const count = countTokens(content, model);
+      currentTokens += count;
+      return count;
+    });
+
+    const warnings: string[] = [];
+
+    if (currentTokens < softLimit) {
+      return { messages, warnings };
+    }
+
+    warnings.push(`[TokenWall] Context size (${currentTokens} tokens) exceeded soft budget (${softLimit} tokens).`);
+
+    let prunedMessages = JSON.parse(JSON.stringify(messages));
+    
+    // Identify critical messages
+    const systemIndices = prunedMessages.map((m: any, i: number) => m.role === 'system' ? i : -1).filter((i: number) => i !== -1);
+    const lastUserIndex = prunedMessages.map((m: any, i: number) => m.role === 'user' ? i : -1).reverse()[0];
+    const preserveIndices = new Set([...systemIndices]);
+    if (lastUserIndex !== undefined) preserveIndices.add(lastUserIndex);
+
+    // Light Pruning
+    if (currentTokens >= lightPruneLimit) {
+      warnings.push(`[TokenWall] Light pruning activated. Dropping huge old outputs.`);
+      for (let i = 0; i < prunedMessages.length; i++) {
+        if (!preserveIndices.has(i) && tokenCounts[i] > 2000 && i < prunedMessages.length - 3) {
+          prunedMessages[i].content = '[TokenWall: Old huge context pruned]';
+          currentTokens -= tokenCounts[i];
+          tokenCounts[i] = 10;
+        }
+      }
+    }
+
+    // Rolling Window
+    if (currentTokens >= rollingLimit) {
+      warnings.push(`[TokenWall] Rolling window activated. Dropping oldest messages.`);
+      for (let i = 0; i < prunedMessages.length; i++) {
+        if (currentTokens <= rollingLimit) break;
+        if (!preserveIndices.has(i) && prunedMessages[i].content !== '[TokenWall: Old huge context pruned]') {
+           prunedMessages[i].content = '[TokenWall: Old message evicted to fit budget]';
+           currentTokens -= tokenCounts[i];
+           tokenCounts[i] = 10;
+        }
+      }
+    }
+
+    // Aggressive Pruning
+    if (currentTokens >= aggressiveLimit) {
+      warnings.push(`[TokenWall] Aggressive pruning activated. Preserving only system and recent context.`);
+      for (let i = 0; i < prunedMessages.length; i++) {
+        if (currentTokens <= totalLimit) break;
+        if (!preserveIndices.has(i)) {
+           prunedMessages[i].content = '[TokenWall: Aggressively evicted]';
+           currentTokens -= tokenCounts[i];
+           tokenCounts[i] = 5;
+        }
+      }
+    }
+
+    return { messages: prunedMessages, warnings };
+  }
+}

@@ -109,19 +109,42 @@ export class ToolSchemaOptimizer {
 // --- Tool Payload Crusher ---
 export class ToolPayloadCrusher {
   /**
-   * Detects if an array is highly heterogeneous by checking keys of first few items
+   * Detects if an array is homogeneous (objects with identical keys and primitive values)
    */
-  static isHeterogeneous(arr: any[]): boolean {
+  static isHomogeneous(arr: any[]): boolean {
     if (arr.length < 5) return false;
-    const keySets = arr.slice(0, 5).map(item => {
-      if (typeof item === 'object' && item !== null) {
+    const keySets = arr.slice(0, Math.min(arr.length, 10)).map(item => {
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        // If any value is a nested object/array, we cannot easily CSV it
+        if (Object.values(item).some(v => typeof v === 'object' && v !== null)) {
+          return 'NESTED';
+        }
         return Object.keys(item).sort().join(',');
       }
-      return typeof item;
+      return 'PRIMITIVE';
     });
     
     const firstKeys = keySets[0];
-    return keySets.some(keys => keys !== firstKeys);
+    if (firstKeys === 'NESTED' || firstKeys === 'PRIMITIVE') return false;
+    return keySets.every(keys => keys === firstKeys);
+  }
+
+  static convertToCSV(arr: any[]): string {
+    const keys = Object.keys(arr[0]).sort();
+    const rows = [keys.join(',')];
+    for (const item of arr) {
+      const row = keys.map(k => {
+        let val = item[k];
+        if (val === null || val === undefined) val = '';
+        const valStr = String(val);
+        if (valStr.includes(',') || valStr.includes('"') || valStr.includes('\n')) {
+          return `"${valStr.replace(/"/g, '""')}"`;
+        }
+        return valStr;
+      });
+      rows.push(row.join(','));
+    }
+    return rows.join('\n');
   }
 
   static crushArray(arr: any[], maxItems: number, maxTokens: number, model: string): any[] {
@@ -130,8 +153,9 @@ export class ToolPayloadCrusher {
       if (tokenCount <= maxTokens) return arr;
     }
 
-    if (this.isHeterogeneous(arr)) {
-      return arr; // Abort truncation for heterogeneous safety
+    if (this.isHomogeneous(arr)) {
+      const csvStr = this.convertToCSV(arr);
+      return [`[TokenWall: SQL/Array converted to CSV for context optimization]`, csvStr];
     }
 
     // Try keeping head and tail
