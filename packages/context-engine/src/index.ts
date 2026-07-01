@@ -6,6 +6,9 @@ import { CacheAlignerPipeline } from './cache-aligner';
 
 export * from './cache-aligner';
 export * from './importance';
+export * from './query-analyzer';
+
+import { QueryAnalyzer } from './query-analyzer';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -81,7 +84,18 @@ export class JsonCrusher {
 }
 
 export class CodeCompressor {
-  static compress(code: string, lang?: string): string {
+  static compress(code: string, lang?: string, queryKeywords?: string[]): string {
+    // Query-Aware Check: If the code contains one of the user's high-priority keywords,
+    // we perform a "light" compression (preserving comments) to retain context.
+    if (queryKeywords && queryKeywords.length > 0) {
+      const lowerCode = code.toLowerCase();
+      const hasMatch = queryKeywords.some(kw => lowerCode.includes(kw));
+      if (hasMatch) {
+        // Light compression: just trim excessive whitespace/newlines, keep comments
+        return code.replace(/\n{3,}/g, '\n\n').trim();
+      }
+    }
+
     if (lang) {
       const lower = lang.toLowerCase();
       if (['javascript', 'typescript', 'js', 'ts'].includes(lower)) {
@@ -113,10 +127,9 @@ export class CodeCompressor {
     // Strip Python/Bash comments (# ...) but avoid stripping string boundaries
     compressed = compressed.replace(/(?<!["'`])#.*$/gm, '');
 
-    // Collapse multiple empty lines
-    compressed = compressed.replace(/\n\s*\n/g, '\n');
-    
-    return compressed.trim();
+    // Strip excessive newlines and spaces
+    compressed = compressed.replace(/\n\s*\n/g, '\n').replace(/[ \t]+/g, ' ').trim();
+    return compressed;
   }
 }
 
@@ -128,6 +141,9 @@ export class ContextAnalyzer {
     let totalWasteTokens = 0;
     const cleanMessages = JSON.parse(JSON.stringify(req.messages)) as NormalizedRequest['messages'];
     const cachedContents: { id: string; content: string }[] = [];
+    
+    // Stage 5: Query-Aware Extraction
+    const queryKeywords = QueryAnalyzer.extractFromMessages(cleanMessages);
 
     const isReversible = config?.reversibleCompression !== false;
 
@@ -329,7 +345,7 @@ export class ContextAnalyzer {
                   });
                 }
              } else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label as string)) {
-                const compressed = CodeCompressor.compress(content, label as string);
+                const compressed = CodeCompressor.compress(content, label as string, queryKeywords);
                 const saved = countTokens(content, req.model) - countTokens(compressed, req.model);
                 if (saved > 0) {
                   totalWasteTokens += saved;
@@ -386,7 +402,7 @@ export class ContextAnalyzer {
           const lang = codeMatch[1];
           const rawCode = codeMatch[2];
           if (rawCode.length > 300) {
-            const compressedCode = CodeCompressor.compress(rawCode, lang);
+            const compressedCode = CodeCompressor.compress(rawCode, lang, queryKeywords);
             
             let newBlock = '';
             let id = '';

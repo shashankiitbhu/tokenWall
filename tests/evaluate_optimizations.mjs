@@ -493,6 +493,36 @@ async function runBenchmark() {
     });
   }
 
+  // Case 9: Query-Aware Code Compression
+  {
+    const analyzer = new ContextAnalyzer();
+    const config = { importance: { policy: 'balanced' }, jsonCrushing: false, codeCompression: true };
+    
+    const queryAwareReq = {
+      model: model,
+      messages: [
+        { role: "user", content: "Please fix the JWT validation logic." },
+        { role: "assistant", content: "Here is the code context:\n```typescript\n/**\n * JWT Auth validator\n * @param token\n */\nfunction validateJWT(token: string) { return true; }\n```\n\n```css\n/* Main button styles */\n.btn { color: red; }\n```" }
+      ],
+      tools: []
+    };
+
+    const start = performance.now();
+    const result = await analyzer.analyze(queryAwareReq, config);
+    const latency = performance.now() - start;
+
+    results.push({
+      id: 'query_aware_compression',
+      name: 'Task-Aware Code Compression',
+      description: 'Preserves comments on files matching user query, aggressively minifies irrelevant files.',
+      beforeText: queryAwareReq.messages[1].content,
+      afterText: result.cleanMessages[1].content,
+      beforeTokens: countTokens(queryAwareReq.messages[1].content, model),
+      afterTokens: countTokens(result.cleanMessages[1].content, model),
+      latencyMs: parseFloat(latency.toFixed(2))
+    });
+  }
+
   // Add statistics calculations
   let totalBefore = 0;
   let totalAfter = 0;
