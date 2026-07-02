@@ -894,7 +894,7 @@ async function handleInterception(
   let action: 'approve' | 'optimize' | 'switch_model' | 'cancel' = 'approve';
   let chosenModel: string | undefined = undefined;
   
-  const hasCostWarning = estimation.estimatedCost >= 0.05;
+  const hasCostWarning = estimation.estimatedCost >= (config.autoApproveLimit ?? 0.05);
   const hasBudgetWarning = budgetCheck.warnOnly;
   const hasRoutingWarning = routingOptions.shouldRoute;
   const hasContextInefficiencies = contextReport.inefficiencies.length > 0;

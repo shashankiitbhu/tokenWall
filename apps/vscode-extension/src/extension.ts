@@ -22,6 +22,9 @@ let intentionalStop = false;
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
 
+  // 0. Transparently intercept global fetch for all extensions in this host
+  interceptExtensionHostTraffic();
+
   // Diagnostic dump of active extensions
   try {
     const dumpPath = '/Users/shashankkumar/Documents/tokenWall/debug_extensions.json';
@@ -940,5 +943,59 @@ async function autoConfigureAIExtensions() {
       }
     }
   }
+}
+
+// -------------------------------------------------------------
+// Global Extension Host Network Interception
+// -------------------------------------------------------------
+function interceptExtensionHostTraffic() {
+  const originalFetch = global.fetch;
+  if (!originalFetch) return;
+
+  global.fetch = async function (input: any, init?: any): Promise<Response> {
+    try {
+      let urlStr = '';
+      if (typeof input === 'string') {
+        urlStr = input;
+      } else if (input instanceof URL) {
+        urlStr = input.toString();
+      } else if (input && typeof input === 'object' && input.url) {
+        urlStr = input.url;
+      }
+
+      if (urlStr) {
+        const urlObj = new URL(urlStr);
+        const host = urlObj.hostname.toLowerCase();
+        
+        // Target AI provider hosts
+        if (
+          host === 'api.anthropic.com' ||
+          host === 'api.openai.com' ||
+          host === 'generativelanguage.googleapis.com'
+        ) {
+          // Reroute to local TokenWall Gateway
+          const newUrl = new URL(urlObj.pathname + urlObj.search, 'http://127.0.0.1:1984');
+          
+          // Modify input transparently
+          if (typeof input === 'string' || input instanceof URL) {
+            input = newUrl.toString();
+          } else if (input && typeof input === 'object' && input.url) {
+            input = new Request(newUrl.toString(), input as any);
+          }
+          
+          init = init || {};
+          init.headers = { ...init.headers, 'x-tokenwall-intercepted': 'true' };
+          
+          daemonOutputChannel?.appendLine(`[TokenWall Interceptor] Transparently rerouted ${host} -> 127.0.0.1:1984`);
+        }
+      }
+    } catch (e) {
+      console.error('[TokenWall] Fetch intercept error:', e);
+    }
+    
+    return originalFetch(input, init);
+  };
+  
+  console.log('TokenWall global.fetch interceptor installed.');
 }
 

@@ -849,7 +849,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Determine if we show interactive warning
     let action = 'approve';
     let chosenModel = undefined;
-    const hasCostWarning = estimation.estimatedCost >= 0.05;
+    const hasCostWarning = estimation.estimatedCost >= (config.autoApproveLimit ?? 0.05);
     const hasBudgetWarning = budgetCheck.warnOnly;
     const hasRoutingWarning = routingOptions.shouldRoute;
     const hasContextInefficiencies = contextReport.inefficiencies.length > 0;
