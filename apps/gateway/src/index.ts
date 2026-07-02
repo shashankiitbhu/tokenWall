@@ -778,6 +778,16 @@ async function handleInterception(
   request: any,
   reply: any
 ) {
+  // Defensive check: If body wasn't parsed as JSON (e.g. missing Content-Type header), parse it now.
+  if (typeof request.body === 'string') {
+    try {
+      request.body = JSON.parse(request.body);
+    } catch (e) {
+      reply.status(400).send({ error: { message: "Invalid JSON payload received by TokenWall." } });
+      return;
+    }
+  }
+
   const sessionId = request.headers['x-tokenwall-session-id'] || 'default-session';
   const projectId = request.headers['x-tokenwall-project-id'] || null;
 

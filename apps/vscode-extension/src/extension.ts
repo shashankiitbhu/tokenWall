@@ -976,7 +976,21 @@ function interceptExtensionHostTraffic() {
           // Reroute to local TokenWall Gateway
           const newUrl = new URL(urlObj.pathname + urlObj.search, 'http://127.0.0.1:1984');
           
-          // Modify input transparently
+          let currentHeaders: Headers;
+          
+          // 1. Extract headers safely from init or input
+          if (init && init.headers) {
+            currentHeaders = new Headers(init.headers);
+          } else if (input && typeof input === 'object' && input.headers) {
+            currentHeaders = new Headers(input.headers);
+          } else {
+            currentHeaders = new Headers();
+          }
+          
+          // 2. Add our interceptor header
+          currentHeaders.set('x-tokenwall-intercepted', 'true');
+          
+          // 3. Modify input and init transparently
           if (typeof input === 'string' || input instanceof URL) {
             input = newUrl.toString();
           } else if (input && typeof input === 'object' && input.url) {
@@ -984,7 +998,7 @@ function interceptExtensionHostTraffic() {
           }
           
           init = init || {};
-          init.headers = { ...init.headers, 'x-tokenwall-intercepted': 'true' };
+          init.headers = currentHeaders;
           
           daemonOutputChannel?.appendLine(`[TokenWall Interceptor] Transparently rerouted ${host} -> 127.0.0.1:1984`);
         }
