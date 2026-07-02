@@ -900,5 +900,45 @@ async function autoConfigureAIExtensions() {
       }
     }
   }
+
+  // 4. Check for Antigravity IDE / extension
+  const isAntigravity = vscode.env.appName.toLowerCase().includes('antigravity') || 
+                        extensions.some(e => e.id.toLowerCase().includes('antigravity'));
+  if (isAntigravity) {
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+      const workspaceRoot = folders[0].uri.fsPath;
+      const envPath = path.join(workspaceRoot, '.env');
+      let envContent = '';
+      let needsConfig = true;
+      
+      if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+        if (envContent.includes('GEMINI_BASE_URL') || envContent.includes('ANTHROPIC_BASE_URL') || envContent.includes('OPENAI_BASE_URL')) {
+          needsConfig = false;
+        }
+      }
+      
+      if (needsConfig) {
+        const opt = await vscode.window.showInformationMessage(
+          'TokenWall detected Antigravity IDE. Enable automatic spend protection and loop blocking for the Antigravity agent in this workspace?',
+          'Enable Protection',
+          'No'
+        );
+        if (opt === 'Enable Protection') {
+          const linesToAdd = [
+            '',
+            '# TokenWall Interception Overrides',
+            'GEMINI_BASE_URL=http://127.0.0.1:1984',
+            'ANTHROPIC_BASE_URL=http://127.0.0.1:1984',
+            'OPENAI_BASE_URL=http://127.0.0.1:1984/v1',
+            ''
+          ];
+          fs.appendFileSync(envPath, linesToAdd.join('\n'), 'utf8');
+          vscode.window.showInformationMessage('TokenWall spend protection enabled for Antigravity in this workspace! Please restart the agent/terminal to apply.');
+        }
+      }
+    }
+  }
 }
 

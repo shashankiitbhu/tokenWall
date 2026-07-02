@@ -1,8 +1,28 @@
 [
   {
-    "id": "TypeScriptTeam.jsts-chat-features",
-    "displayName": "JS/TS Chat Features",
-    "name": "jsts-chat-features"
+    "id": "google.antigravity",
+    "displayName": "Antigravity",
+    "name": "antigravity"
+  },
+  {
+    "id": "google.antigravity-code-executor",
+    "displayName": "Antigravity Code Executor",
+    "name": "antigravity-code-executor"
+  },
+  {
+    "id": "google.antigravity-dev-containers",
+    "displayName": "Antigravity Remote - Dev Containers",
+    "name": "antigravity-dev-containers"
+  },
+  {
+    "id": "google.antigravity-remote-openssh",
+    "displayName": "Antigravity Remote - SSH",
+    "name": "antigravity-remote-openssh"
+  },
+  {
+    "id": "google.antigravity-remote-wsl",
+    "displayName": "Antigravity Remote - WSL",
+    "name": "antigravity-remote-wsl"
   },
   {
     "id": "vscode.bat",
@@ -23,11 +43,6 @@
     "id": "vscode.configuration-editing",
     "displayName": "Configuration Editing",
     "name": "configuration-editing"
-  },
-  {
-    "id": "GitHub.copilot-chat",
-    "displayName": "GitHub Copilot Chat",
-    "name": "copilot-chat"
   },
   {
     "id": "vscode.cpp",
@@ -166,7 +181,7 @@
   },
   {
     "id": "vscode.jake",
-    "displayName": "Jake support for VS Code",
+    "displayName": "Jake support for Jetski",
     "name": "jake"
   },
   {
@@ -245,9 +260,9 @@
     "name": "merge-conflict"
   },
   {
-    "id": "vscode.mermaid-markdown-features",
-    "displayName": "Mermaid Markdown Features",
-    "name": "mermaid-markdown-features"
+    "id": "vscode.mermaid-chat-features",
+    "displayName": "Mermaid Chat Features",
+    "name": "mermaid-chat-features"
   },
   {
     "id": "vscode.microsoft-authentication",
@@ -276,7 +291,7 @@
   },
   {
     "id": "vscode.npm",
-    "displayName": "NPM support for VS Code",
+    "displayName": "NPM support for the IDE",
     "name": "npm"
   },
   {
@@ -440,6 +455,21 @@
     "name": "theme-solarized-light"
   },
   {
+    "id": "miguelsolorio.symbols",
+    "displayName": "Symbols",
+    "name": "symbols"
+  },
+  {
+    "id": "RobbOwen.synthwave-vscode",
+    "displayName": "SynthWave '84",
+    "name": "synthwave-vscode"
+  },
+  {
+    "id": "enkia.tokyo-night",
+    "displayName": "Tokyo Night",
+    "name": "tokyo-night"
+  },
+  {
     "id": "vscode.theme-tomorrow-night-blue",
     "displayName": "Tomorrow Night Blue Theme",
     "name": "theme-tomorrow-night-blue"
@@ -456,7 +486,7 @@
   },
   {
     "id": "vscode.typescript-language-features",
-    "displayName": "JavaScript and TypeScript Language Features",
+    "displayName": "TypeScript and JavaScript Language Features",
     "name": "typescript-language-features"
   },
   {
@@ -475,109 +505,19 @@
     "name": "yaml"
   },
   {
-    "id": "1YiB.rust-bundle",
-    "displayName": "rust",
-    "name": "rust-bundle"
-  },
-  {
-    "id": "aaravb.chrome-extension-developer-tools",
-    "displayName": "Chrome Extension Developer Tools",
-    "name": "chrome-extension-developer-tools"
-  },
-  {
-    "id": "abdoseadaa.node-js-snippet",
-    "displayName": "Nodejs Snippets",
-    "name": "node-js-snippet"
-  },
-  {
-    "id": "alexisvt.flutter-snippets",
-    "displayName": "Flutter Widget Snippets",
-    "name": "flutter-snippets"
-  },
-  {
-    "id": "Anthropic.claude-code",
-    "displayName": "Claude Code for VS Code",
-    "name": "claude-code"
-  },
-  {
-    "id": "Dart-Code.dart-code",
-    "displayName": "Dart",
-    "name": "dart-code"
-  },
-  {
-    "id": "Dart-Code.flutter",
-    "displayName": "Flutter",
-    "name": "flutter"
-  },
-  {
-    "id": "DivyanshuAgrawal.competitive-programming-helper",
-    "displayName": "Competitive Programming Helper (cph)",
-    "name": "competitive-programming-helper"
-  },
-  {
-    "id": "docker.docker",
-    "displayName": "Docker DX",
-    "name": "docker"
-  },
-  {
-    "id": "dustypomerleau.rust-syntax",
-    "displayName": "Rust Syntax",
-    "name": "rust-syntax"
-  },
-  {
-    "id": "esbenp.prettier-vscode",
-    "displayName": "Prettier - Code formatter",
-    "name": "prettier-vscode"
-  },
-  {
-    "id": "fill-labs.dependi",
-    "displayName": "Dependi",
-    "name": "dependi"
-  },
-  {
-    "id": "formulahendry.code-runner",
-    "displayName": "Code Runner",
-    "name": "code-runner"
-  },
-  {
-    "id": "formulahendry.docker-explorer",
-    "displayName": "Docker Explorer",
-    "name": "docker-explorer"
-  },
-  {
-    "id": "github.vscode-github-actions",
-    "displayName": "GitHub Actions",
-    "name": "vscode-github-actions"
-  },
-  {
     "id": "golang.go",
     "displayName": "Go",
     "name": "go"
   },
   {
-    "id": "google.geminicodeassist",
-    "displayName": "Gemini Code Assist",
-    "name": "geminicodeassist"
+    "id": "llvm-vs-code-extensions.vscode-clangd",
+    "displayName": "clangd",
+    "name": "vscode-clangd"
   },
   {
-    "id": "isudox.vscode-jetbrains-keybindings",
-    "displayName": "JetBrains IDE Keymap",
-    "name": "vscode-jetbrains-keybindings"
-  },
-  {
-    "id": "kcl.kcl-vscode-extension",
-    "displayName": "KCL",
-    "name": "kcl-vscode-extension"
-  },
-  {
-    "id": "ms-azuretools.vscode-containers",
-    "displayName": "Container Tools",
-    "name": "vscode-containers"
-  },
-  {
-    "id": "ms-azuretools.vscode-docker",
-    "displayName": "Docker",
-    "name": "vscode-docker"
+    "id": "meta.pyrefly",
+    "displayName": "Pyrefly - Python Language Tooling",
+    "name": "pyrefly"
   },
   {
     "id": "ms-python.debugpy",
@@ -590,113 +530,18 @@
     "name": "python"
   },
   {
-    "id": "ms-python.vscode-pylance",
-    "displayName": "Pylance",
-    "name": "vscode-pylance"
-  },
-  {
     "id": "ms-python.vscode-python-envs",
     "displayName": "Python Environments",
     "name": "vscode-python-envs"
   },
   {
-    "id": "ms-vscode-remote.remote-containers",
-    "displayName": "Dev Containers",
-    "name": "remote-containers"
-  },
-  {
-    "id": "ms-vscode.cmake-tools",
-    "displayName": "CMake Tools",
-    "name": "cmake-tools"
-  },
-  {
-    "id": "ms-vscode.cpp-devtools",
-    "displayName": "C/C++ DevTools",
-    "name": "cpp-devtools"
-  },
-  {
-    "id": "ms-vscode.cpptools",
-    "displayName": "C/C++",
-    "name": "cpptools"
-  },
-  {
-    "id": "ms-vscode.cpptools-extension-pack",
-    "displayName": "C/C++ Extension Pack",
-    "name": "cpptools-extension-pack"
-  },
-  {
-    "id": "ms-vscode.cpptools-themes",
-    "displayName": "C/C++ Themes",
-    "name": "cpptools-themes"
-  },
-  {
-    "id": "ms-vscode.vscode-typescript-next",
-    "displayName": "JavaScript and TypeScript Nightly",
-    "name": "vscode-typescript-next"
-  },
-  {
-    "id": "Oracle.oracle-java",
-    "displayName": "Java",
-    "name": "oracle-java"
-  },
-  {
-    "id": "redhat.java",
-    "displayName": "Language Support for Java(TM) by Red Hat",
-    "name": "java"
-  },
-  {
-    "id": "rust-lang.rust-analyzer",
-    "displayName": "rust-analyzer",
-    "name": "rust-analyzer"
-  },
-  {
-    "id": "shd101wyy.markdown-preview-enhanced",
-    "displayName": "Markdown Preview Enhanced",
-    "name": "markdown-preview-enhanced"
+    "id": "Shopify.ruby-lsp",
+    "displayName": "Ruby LSP",
+    "name": "ruby-lsp"
   },
   {
     "id": "tokenwall.tokenwall-vscode",
     "displayName": "TokenWall",
     "name": "tokenwall-vscode"
-  },
-  {
-    "id": "twxs.cmake",
-    "displayName": "CMake",
-    "name": "cmake"
-  },
-  {
-    "id": "vscjava.vscode-gradle",
-    "displayName": "Gradle for Java",
-    "name": "vscode-gradle"
-  },
-  {
-    "id": "vscjava.vscode-java-debug",
-    "displayName": "Debugger for Java",
-    "name": "vscode-java-debug"
-  },
-  {
-    "id": "vscjava.vscode-java-dependency",
-    "displayName": "Project Manager for Java",
-    "name": "vscode-java-dependency"
-  },
-  {
-    "id": "vscjava.vscode-java-pack",
-    "displayName": "Extension Pack for Java",
-    "name": "vscode-java-pack"
-  },
-  {
-    "id": "vscjava.vscode-java-test",
-    "displayName": "Test Runner for Java",
-    "name": "vscode-java-test"
-  },
-  {
-    "id": "vscjava.vscode-maven",
-    "displayName": "Maven for Java",
-    "name": "vscode-maven"
-  },
-  {
-    "id": "vscodevim.vim",
-    "displayName": "Vim",
-    "name": "vim"
   }
 ]
