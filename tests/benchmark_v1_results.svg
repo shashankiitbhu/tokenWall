@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <!-- Background Gradients -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#FCFCFC" />
+    </linearGradient>
+
+    <!-- Drop Shadow for Cards -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.03" flood-color="#000000" />
+    </filter>
+  </defs>
+
+  <style>
+    .title { font-family: 'Outfit', 'Inter', -apple-system, sans-serif; font-weight: 800; }
+    .subtitle { font-family: 'Inter', -apple-system, sans-serif; font-weight: 600; }
+    .body-text { font-family: 'Inter', -apple-system, sans-serif; }
+    .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
+  </style>
+
+  <!-- Clean Off-White Background -->
+  <rect width="1200" height="630" fill="#FAF9F5" />
+
+  <!-- Extremely Subtle Grid for Technical Feel -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#F1EFEA" stroke-width="1"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#grid)" />
+
+  <!-- Outer Border -->
+  <rect x="0.5" y="0.5" width="1199" height="629" fill="none" stroke="#E2E0D9" stroke-width="1" rx="16" />
+
+  <!-- ================= LEFT COLUMN ================= -->
+
+  <!-- Logo and Header -->
+  <g transform="translate(50, 50)">
+    <rect width="32" height="32" rx="8" fill="#111111" />
+    <text x="10" y="22" fill="#ffffff" font-size="16" font-family="'Outfit', sans-serif" font-weight="900">T</text>
+    <text x="45" y="22" fill="#111111" font-size="20" font-family="'Outfit', sans-serif" font-weight="800" letter-spacing="-0.02em">TokenWall</text>
+    
+    <rect x="155" y="4" width="70" height="22" rx="4" fill="#E5E7EB" />
+    <text x="190" y="19" fill="#374151" font-size="10" font-family="'Inter', sans-serif" font-weight="700" letter-spacing="0.05em" text-anchor="middle">RESEARCH</text>
+  </g>
+
+  <!-- Main Hero Title -->
+  <g transform="translate(50, 130)">
+    <text class="title" fill="#111111" font-size="42" letter-spacing="-0.03em" y="0">Adaptive AI Context</text>
+    <text class="title" fill="#111111" font-size="42" letter-spacing="-0.03em" y="45">Compression</text>
+    <!-- Broken into 3 lines to fit safely within the 490px left column width -->
+    <text class="body-text" fill="#4B5563" font-size="15" font-weight="400" y="85">Achieving 65.3% reduction in LLM prompt</text>
+    <text class="body-text" fill="#4B5563" font-size="15" font-weight="400" y="110">payloads with zero intelligence loss. Bypasses</text>
+    <text class="body-text" fill="#4B5563" font-size="15" font-weight="400" y="135">naive regex for deep AST parsing.</text>
+  </g>
+
+  <!-- 4-Grid Metrics -->
+  <g transform="translate(50, 300)">
+    <!-- Metric 1: Savings -->
+    <g transform="translate(0, 0)">
+      <rect width="230" height="105" rx="12" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" filter="url(#shadow)" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="30">PAYLOAD REDUCTION</text>
+      <text class="title" fill="#111827" font-size="36" font-weight="800" x="20" y="68">65.3%</text>
+      <text class="body-text" fill="#10B981" font-size="12" font-weight="600" x="20" y="90">↓ 8,733 tokens / req</text>
+    </g>
+
+    <!-- Metric 2: Dollars saved -->
+    <g transform="translate(250, 0)">
+      <rect width="230" height="105" rx="12" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" filter="url(#shadow)" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="30">MONTHLY ROI (OPUS)</text>
+      <text class="title" fill="#111827" font-size="36" font-weight="800" x="20" y="68">$262</text>
+      <text class="body-text" fill="#4B5563" font-size="12" font-weight="500" x="20" y="90">Per agent (200/day)</text>
+    </g>
+
+    <!-- Metric 3: Semantic Integrity -->
+    <g transform="translate(0, 125)">
+      <rect width="230" height="105" rx="12" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" filter="url(#shadow)" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="30">SEMANTIC INTEGRITY</text>
+      <text class="title" fill="#111827" font-size="36" font-weight="800" x="20" y="68">100%</text>
+      <text class="body-text" fill="#6B7280" font-size="12" font-weight="500" x="20" y="90">Up from 82% in v0</text>
+    </g>
+
+    <!-- Metric 4: Net TTFB Speedup -->
+    <g transform="translate(250, 125)">
+      <rect width="230" height="105" rx="12" fill="url(#cardGrad)" stroke="#E5E7EB" stroke-width="1" filter="url(#shadow)" />
+      <text class="body-text" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="0.05em" x="20" y="30">NET LATENCY IMPACT</text>
+      <text class="title" fill="#111827" font-size="36" font-weight="800" x="20" y="68">-1.1s</text>
+      <text class="body-text" fill="#6B7280" font-size="12" font-weight="500" x="20" y="90">67ms local overhead</text>
+    </g>
+  </g>
+
+  <!-- Infrastructure Footnote -->
+  <g transform="translate(50, 545)">
+    <text class="body-text" fill="#9CA3AF" font-size="12">Evaluated on:</text>
+    <rect x="0" y="20" width="480" height="36" rx="6" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+    <text class="mono" fill="#4B5563" font-size="11" x="15" y="42">claude-4.8-opus | V8 Engine | Node 20</text>
+  </g>
+
+  <!-- ================= RIGHT COLUMN ================= -->
+
+  <!-- Deep Data Dashboard Box -->
+  <g transform="translate(550, 50)">
+    <!-- White Card Box container -->
+    <rect width="600" height="530" rx="16" fill="#ffffff" stroke="#E5E7EB" stroke-width="1" filter="url(#shadow)" />
+    
+    <text class="subtitle" fill="#111827" font-size="18" x="40" y="45">Empirical Evaluation Results</text>
+    <text class="body-text" fill="#6B7280" font-size="13" x="40" y="65">Mean payload reduction across 100 agent iterations</text>
+    
+    <!-- Logical Before/After Bar Chart (Cleaned Up) -->
+    <g transform="translate(40, 110)">
+      
+      <!-- Baseline Bar -->
+      <text class="body-text" fill="#111827" font-size="13" font-weight="700" x="0" y="20">BASELINE</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="36">Cost: $0.0668</text>
+      
+      <!-- Background track -->
+      <rect x="120" y="0" width="400" height="42" rx="8" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+      <rect x="120" y="0" width="400" height="42" rx="8" fill="#374151" />
+      <text class="mono" fill="#ffffff" font-size="14" font-weight="700" x="140" y="26">13,365 tokens</text>
+      <text class="title" fill="#9CA3AF" font-size="12" x="460" y="26">100%</text>
+
+      <!-- TokenWall Bar -->
+      <text class="body-text" fill="#10B981" font-size="13" font-weight="700" x="0" y="85">TOKENWALL</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="101">Cost: $0.0232</text>
+      
+      <!-- Background track -->
+      <rect x="120" y="65" width="400" height="42" rx="8" fill="#F3F4F6" stroke="#E5E7EB" stroke-width="1" />
+      <rect x="120" y="65" width="139" height="42" rx="8" fill="#10B981" />
+      
+      <text class="mono" fill="#ffffff" font-size="14" font-weight="700" x="140" y="91">4,632 tokens</text>
+      
+      <!-- Savings Badge floating next to the bar -->
+      <g transform="translate(275, 71)">
+        <rect width="64" height="30" rx="15" fill="#ECFDF5" stroke="#10B981" stroke-width="1" />
+        <text class="title" fill="#059669" font-size="13" x="32" y="20" text-anchor="middle">-65.3%</text>
+      </g>
+    </g>
+
+    <line x1="40" y1="235" x2="560" y2="235" stroke="#E5E7EB" stroke-width="1" />
+
+    <!-- Granular Analytics Breakdown -->
+    <text class="subtitle" fill="#111827" font-size="15" x="40" y="275">Optimization Telemetry by Data Structure</text>
+    
+    <!-- Item 1: Source Code -->
+    <g transform="translate(40, 305)">
+      <text class="body-text" fill="#374151" font-size="13" font-weight="600" x="0" y="12">Source Code via AST Parser</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="28">Query-aware intent pruning &amp; JSDoc preservation</text>
+      <rect x="240" y="0" width="280" height="8" rx="4" fill="#F3F4F6" />
+      <rect x="240" y="0" width="135" height="8" rx="4" fill="#111827" /> <!-- ~52% -->
+      <text class="mono" fill="#111827" font-size="12" font-weight="600" x="530" y="10" text-anchor="end">-52.3%</text>
+      <text class="mono" fill="#6B7280" font-size="10" x="530" y="26" text-anchor="end">4.1k tokens saved</text>
+    </g>
+
+    <!-- Item 2: API/JSON -->
+    <g transform="translate(40, 360)">
+      <text class="body-text" fill="#374151" font-size="13" font-weight="600" x="0" y="12">JSON &amp; API Payloads</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="28">Deep key-crushing &amp; structural minification</text>
+      <rect x="240" y="0" width="280" height="8" rx="4" fill="#F3F4F6" />
+      <rect x="240" y="0" width="238" height="8" rx="4" fill="#374151" /> <!-- ~85% -->
+      <text class="mono" fill="#111827" font-size="12" font-weight="600" x="530" y="10" text-anchor="end">-85.1%</text>
+      <text class="mono" fill="#6B7280" font-size="10" x="530" y="26" text-anchor="end">2.8k tokens saved</text>
+    </g>
+
+    <!-- Item 3: Terminal Logs -->
+    <g transform="translate(40, 415)">
+      <text class="body-text" fill="#374151" font-size="13" font-weight="600" x="0" y="12">Terminal &amp; Stack Traces</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="28">Lexical importance scoring (Error/Warning focus)</text>
+      <rect x="240" y="0" width="280" height="8" rx="4" fill="#F3F4F6" />
+      <rect x="240" y="0" width="257" height="8" rx="4" fill="#4B5563" /> <!-- ~92% -->
+      <text class="mono" fill="#111827" font-size="12" font-weight="600" x="530" y="10" text-anchor="end">-92.0%</text>
+      <text class="mono" fill="#6B7280" font-size="10" x="530" y="26" text-anchor="end">1.2k tokens saved</text>
+    </g>
+
+    <!-- Item 4: Context Deduplication -->
+    <g transform="translate(40, 470)">
+      <text class="body-text" fill="#374151" font-size="13" font-weight="600" x="0" y="12">Historical Message Context</text>
+      <text class="body-text" fill="#6B7280" font-size="11" x="0" y="28">Rolling window budgets &amp; exact duplicate removal</text>
+      <rect x="240" y="0" width="280" height="8" rx="4" fill="#F3F4F6" />
+      <rect x="240" y="0" width="60" height="8" rx="4" fill="#9CA3AF" /> <!-- ~21% -->
+      <text class="mono" fill="#111827" font-size="12" font-weight="600" x="530" y="10" text-anchor="end">-21.5%</text>
+      <text class="mono" fill="#6B7280" font-size="10" x="530" y="26" text-anchor="end">0.6k tokens saved</text>
+    </g>
+  </g>
+
+</svg>
