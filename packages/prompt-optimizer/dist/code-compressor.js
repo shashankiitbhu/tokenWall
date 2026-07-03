@@ -1,54 +1,32 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CodeCompressor = void 0;
-const ts = __importStar(require("typescript"));
+const tree_sitter_1 = __importDefault(require("tree-sitter"));
+const tree_sitter_javascript_1 = __importDefault(require("tree-sitter-javascript"));
+const tree_sitter_typescript_1 = __importDefault(require("tree-sitter-typescript"));
+const jsParser = new tree_sitter_1.default();
+jsParser.setLanguage(tree_sitter_javascript_1.default);
+const tsParser = new tree_sitter_1.default();
+tsParser.setLanguage(tree_sitter_typescript_1.default.typescript);
+const tsxParser = new tree_sitter_1.default();
+tsxParser.setLanguage(tree_sitter_typescript_1.default.tsx);
 class CodeCompressor {
     /**
      * Scans a prompt for JS/TS code blocks and `<file_content>` blocks,
-     * parses them into an AST, aggressively skeletonizes large function bodies,
-     * strips comments, and replaces the block with beautifully formatted sparsified code.
+     * parses them into an AST using Tree-sitter, strips only actual comment nodes
+     * by byte-range slicing to preserve original whitespace, empty lines, and non-comment structure perfectly.
      */
     static compress(prompt) {
         // Match Markdown code blocks (```javascript, ```js, ```typescript, ```ts)
-        const mdBlockRegex = /```(javascript|js|typescript|ts)\s*([\s\S]*?)\s*```/gi;
+        const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
         // Match XML file_content blocks with .js, .ts, .jsx, .tsx extensions
         const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
             try {
-                const sparsified = this.sparsifyCode(code);
+                const sparsified = this.sparsifyCode(code, lang);
                 return `\`\`\`${lang}\n${sparsified}\n\`\`\``;
             }
             catch (e) {
@@ -58,7 +36,7 @@ class CodeCompressor {
         });
         optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
             try {
-                const sparsified = this.sparsifyCode(code);
+                const sparsified = this.sparsifyCode(code, ext);
                 // Replace only the inner code content, keep the XML tags intact
                 return match.replace(code, `\n${sparsified}\n`);
             }
@@ -69,54 +47,49 @@ class CodeCompressor {
         return optimized;
     }
     /**
-     * Parses the code, skeletonizes it, and prints it out.
+     * Parses the code with Tree-sitter and splices out comment nodes.
      */
-    static sparsifyCode(code) {
-        const sourceFile = ts.createSourceFile('temp.ts', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-        const transformer = (context) => {
-            const visit = (node) => {
-                // Skeletonize large functions/methods
-                if (ts.isFunctionDeclaration(node) ||
-                    ts.isMethodDeclaration(node) ||
-                    ts.isArrowFunction(node)) {
-                    if (node.body && ts.isBlock(node.body)) {
-                        // Calculate approximate lines
-                        const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line;
-                        const endLine = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line;
-                        const lineCount = endLine - startLine;
-                        if (lineCount > 10) {
-                            // Replace the body with a stub
-                            const stubComment = ts.factory.createJSDocComment(' [TokenWall: Function body sparsified] ');
-                            const stubBody = ts.factory.createBlock([ts.factory.createEmptyStatement()], true // multiline
-                            );
-                            // We inject the comment synthetically. However, factory methods 
-                            // for updating nodes are safer.
-                            ts.addSyntheticLeadingComment(stubBody, ts.SyntaxKind.MultiLineCommentTrivia, ' [TokenWall: Function body sparsified] ', true);
-                            if (ts.isFunctionDeclaration(node)) {
-                                return ts.factory.updateFunctionDeclaration(node, node.modifiers, node.asteriskToken, node.name, node.typeParameters, node.parameters, node.type, stubBody);
-                            }
-                            else if (ts.isMethodDeclaration(node)) {
-                                return ts.factory.updateMethodDeclaration(node, node.modifiers, node.asteriskToken, node.name, node.questionToken, node.typeParameters, node.parameters, node.type, stubBody);
-                            }
-                            else if (ts.isArrowFunction(node)) {
-                                return ts.factory.updateArrowFunction(node, node.modifiers, node.typeParameters, node.parameters, node.type, node.equalsGreaterThanToken, stubBody);
-                            }
-                        }
-                    }
+    static sparsifyCode(code, langOrExt) {
+        const ext = langOrExt.toLowerCase();
+        let parser;
+        if (ext === 'javascript' || ext === 'js') {
+            parser = jsParser;
+        }
+        else if (ext === 'typescript' || ext === 'ts') {
+            parser = tsParser;
+        }
+        else if (ext === 'tsx') {
+            parser = tsxParser;
+        }
+        else {
+            parser = tsParser; // Fallback
+        }
+        try {
+            const tree = parser.parse(code);
+            const commentNodes = [];
+            const walk = (node) => {
+                if (node.type === 'comment') {
+                    commentNodes.push(node);
                 }
-                return ts.visitEachChild(node, visit, context);
+                for (let i = 0; i < node.childCount; i++) {
+                    const child = node.child(i);
+                    if (child)
+                        walk(child);
+                }
             };
-            return (node) => ts.visitNode(node, visit);
-        };
-        const result = ts.transform(sourceFile, [transformer]);
-        const transformedSourceFile = result.transformed[0];
-        const printer = ts.createPrinter({
-            removeComments: true, // Sparsification: remove noisy comments/JSDoc
-            newLine: ts.NewLineKind.LineFeed,
-        });
-        const printed = printer.printFile(transformedSourceFile);
-        result.dispose();
-        return printed;
+            walk(tree.rootNode);
+            // Sort descending by startIndex so we can slice from end-to-start without corrupting earlier offsets
+            commentNodes.sort((a, b) => b.startIndex - a.startIndex);
+            let result = code;
+            for (const node of commentNodes) {
+                result = result.slice(0, node.startIndex) + result.slice(node.endIndex);
+            }
+            return result.trim();
+        }
+        catch (e) {
+            console.error("[TokenWall CodeCompressor] Tree-sitter parsing failed:", e);
+            return code;
+        }
     }
 }
 exports.CodeCompressor = CodeCompressor;

@@ -5,6 +5,9 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@tokenwall/core": "file:../core",
-    "@tokenwall/providers": "file:../providers"
+    "@tokenwall/providers": "file:../providers",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-javascript": "^0.23.1",
+    "tree-sitter-typescript": "^0.23.2"
   }
 }

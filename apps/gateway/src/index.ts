@@ -176,12 +176,16 @@ function getOptimizedMessages(
     if (!cleanMsg) continue;
     
     let newText = cleanMsg.content;
-    if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-      const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
-      newText = opt.optimizedText;
-    } else if (cleanMsg.role === 'tool') {
-      // OpenAI tool response payload crushing
-      newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
+    try {
+      if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
+        const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+        newText = opt.optimizedText;
+      } else if (cleanMsg.role === 'tool') {
+        newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
+      }
+    } catch (e: any) {
+      console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
+      newText = cleanMsg.content; // fallback
     }
 
     if (typeof origMsg.content === 'string') {
@@ -212,11 +216,19 @@ function getOptimizedMessages(
       origMsg.content.forEach((b: any) => {
         if (b.type === 'tool_result') {
           if (typeof b.content === 'string') {
-            b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model);
+            try {
+              b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model);
+            } catch (e) {
+              console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
+            }
           } else if (Array.isArray(b.content)) {
             b.content.forEach((part: any) => {
               if (part.type === 'text' && typeof part.text === 'string') {
-                part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                try {
+                  part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                } catch (e) {
+                  console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
+                }
               }
             });
           }
@@ -243,8 +255,13 @@ function getOptimizedGeminiContents(
     
     let newText = cleanMsg.content;
     if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-      const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
-      newText = opt.optimizedText;
+      try {
+        const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+        newText = opt.optimizedText;
+      } catch (e: any) {
+        console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
+        newText = cleanMsg.content;
+      }
     }
 
     if (Array.isArray(origContent.parts)) {
@@ -825,8 +842,26 @@ async function handleInterception(
   // Pre-flight validation
   const estimation = calculatePreFlightEstimation(parsedRequest);
   const config = configManager.getConfig();
-  const contextReport = await contextAnalyzer.analyze(parsedRequest, config);
-  const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
+  const isKillSwitchActive = process.env.TOKENWALL_KILL_SWITCH === 'true';
+
+  let contextReport: any = { inefficiencies: [], cleanMessages: parsedRequest.messages };
+  let routingOptions: any = { shouldRoute: false, alternatives: [] };
+
+  if (!isKillSwitchActive) {
+    try {
+      contextReport = await contextAnalyzer.analyze(parsedRequest, config);
+    } catch (err: any) {
+      console.error("[TokenWall Gateway] ContextAnalyzer failed, falling open:", err.message);
+      telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ContextAnalyzer', error: err.message } });
+    }
+    
+    try {
+      routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
+    } catch (err: any) {
+      console.error("[TokenWall Gateway] ModelRouter failed, falling open:", err.message);
+      telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ModelRouter', error: err.message } });
+    }
+  }
   
   // Prompt Optimization (heuristic compression preview)
   const userMessages = parsedRequest.messages.filter(m => m.role === 'user');
@@ -838,9 +873,16 @@ async function handleInterception(
 
   // We apply prompt optimizer to ALL user messages in getOptimizedMessages later.
   // For telemetry/preview purposes, we just run it on the last user message to see if there's any immediate savings.
-  const optimization = lastUserMsg
-    ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
-    : undefined;
+  let optimization: any = undefined;
+  if (!isKillSwitchActive) {
+    try {
+      optimization = lastUserMsg
+        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
+        : undefined;
+    } catch (err: any) {
+      console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
+    }
+  }
 
   // Run loop detector
   const loopCheck = loopDetector.detect(sessionId, lastUserMsg ? lastUserMsg.content : '', estimation.estimatedInputTokens);
@@ -875,7 +917,15 @@ async function handleInterception(
   }
 
   // Run budget evaluation (Transactional Reservation)
-  const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
+  let budgetCheck: any = { allowed: true, warnOnly: false };
+  if (!isKillSwitchActive) {
+    try {
+      budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
+    } catch (err: any) {
+      console.error("[TokenWall Gateway] BudgetEvaluator failed, falling open:", err.message);
+      telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'BudgetEvaluator', error: err.message } });
+    }
+  }
 
   if (!budgetCheck.allowed) {
     telemetryLogger.emitEvent({
@@ -1026,7 +1076,7 @@ async function handleInterception(
 
   if (action === 'optimize') {
     const cleanMsgs = contextReport.cleanMessages;
-    const lastUserIdx = cleanMsgs.map(m => m.role).lastIndexOf('user');
+    const lastUserIdx = cleanMsgs.map((m: any) => m.role).lastIndexOf('user');
     
     // Re-serialize back to provider schema while preserving non-text blocks
     if (provider === 'openai' || provider === 'anthropic') {
@@ -1077,10 +1127,17 @@ async function handleInterception(
     
     // Optimize tool schemas and expose tools via routing if tools are present
     if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
-      finalRequestBody.tools = ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
-      finalRequestBody.tools = ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
-      // Re-parse to count final token savings accurately
-      finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+      try {
+        finalRequestBody.tools = ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
+        finalRequestBody.tools = ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
+        // Re-parse to count final token savings accurately
+        finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+      } catch (err: any) {
+        console.error("[TokenWall Gateway] Tool optimization failed, falling open:", err.message);
+        // Tool array might be corrupted if it failed halfway, so we can try to fall back to the original
+        finalRequestBody.tools = request.body.tools;
+        finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+      }
     }
     
     const optimizedEstimation = calculatePreFlightEstimation(finalRequest);

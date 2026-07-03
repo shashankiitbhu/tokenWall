@@ -162,13 +162,18 @@ function getOptimizedMessages(originalMessages, cleanMessages, model, disableCod
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
-        if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
-            newText = opt.optimizedText;
+        try {
+            if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
+                const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+                newText = opt.optimizedText;
+            }
+            else if (cleanMsg.role === 'tool') {
+                newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
+            }
         }
-        else if (cleanMsg.role === 'tool') {
-            // OpenAI tool response payload crushing
-            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
+        catch (e) {
+            console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
+            newText = cleanMsg.content; // fallback
         }
         if (typeof origMsg.content === 'string') {
             origMsg.content = newText;
@@ -199,12 +204,22 @@ function getOptimizedMessages(originalMessages, cleanMessages, model, disableCod
             origMsg.content.forEach((b) => {
                 if (b.type === 'tool_result') {
                     if (typeof b.content === 'string') {
-                        b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+                        try {
+                            b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+                        }
+                        catch (e) {
+                            console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
+                        }
                     }
                     else if (Array.isArray(b.content)) {
                         b.content.forEach((part) => {
                             if (part.type === 'text' && typeof part.text === 'string') {
-                                part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                                try {
+                                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                                }
+                                catch (e) {
+                                    console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
+                                }
                             }
                         });
                     }
@@ -225,8 +240,14 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model, disa
             continue;
         let newText = cleanMsg.content;
         if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
-            newText = opt.optimizedText;
+            try {
+                const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+                newText = opt.optimizedText;
+            }
+            catch (e) {
+                console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
+                newText = cleanMsg.content;
+            }
         }
         if (Array.isArray(origContent.parts)) {
             let firstTextPart = null;
@@ -798,17 +819,42 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Pre-flight validation
     const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
     const config = configManager.getConfig();
-    const contextReport = await contextAnalyzer.analyze(parsedRequest, config);
-    const routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
+    const isKillSwitchActive = process.env.TOKENWALL_KILL_SWITCH === 'true';
+    let contextReport = { inefficiencies: [], cleanMessages: parsedRequest.messages };
+    let routingOptions = { shouldRoute: false, alternatives: [] };
+    if (!isKillSwitchActive) {
+        try {
+            contextReport = await contextAnalyzer.analyze(parsedRequest, config);
+        }
+        catch (err) {
+            console.error("[TokenWall Gateway] ContextAnalyzer failed, falling open:", err.message);
+            telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ContextAnalyzer', error: err.message } });
+        }
+        try {
+            routingOptions = modelRouter.generateRoutingOptions(parsedRequest, estimation.estimatedInputTokens, estimation.estimatedOutputTokens);
+        }
+        catch (err) {
+            console.error("[TokenWall Gateway] ModelRouter failed, falling open:", err.message);
+            telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ModelRouter', error: err.message } });
+        }
+    }
     // Prompt Optimization (heuristic compression preview)
     const userMessages = parsedRequest.messages.filter(m => m.role === 'user');
     const lastUserMsg = userMessages[userMessages.length - 1];
     const hasEditTools = request.body.tools && request.body.tools.some((t) => ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name));
     // We apply prompt optimizer to ALL user messages in getOptimizedMessages later.
     // For telemetry/preview purposes, we just run it on the last user message to see if there's any immediate savings.
-    const optimization = lastUserMsg
-        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
-        : undefined;
+    let optimization = undefined;
+    if (!isKillSwitchActive) {
+        try {
+            optimization = lastUserMsg
+                ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
+                : undefined;
+        }
+        catch (err) {
+            console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
+        }
+    }
     // Run loop detector
     const loopCheck = loopDetector.detect(sessionId, lastUserMsg ? lastUserMsg.content : '', estimation.estimatedInputTokens);
     if (loopCheck.loopDetected) {
@@ -834,7 +880,16 @@ async function handleInterception(provider, targetUrl, request, reply) {
         return sendBlockedResponse(reply, provider, 400, loopCheck.reason || 'Runaway loop detected', 'runaway_loop_detected', 'too_many_requests');
     }
     // Run budget evaluation (Transactional Reservation)
-    const budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
+    let budgetCheck = { allowed: true, warnOnly: false };
+    if (!isKillSwitchActive) {
+        try {
+            budgetCheck = budgetEvaluator.evaluate(projectId, sessionId, requestId, estimation.estimatedCost, parsedRequest.provider, parsedRequest.model);
+        }
+        catch (err) {
+            console.error("[TokenWall Gateway] BudgetEvaluator failed, falling open:", err.message);
+            telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'BudgetEvaluator', error: err.message } });
+        }
+    }
     if (!budgetCheck.allowed) {
         telemetryLogger.emitEvent({
             eventType: 'budget_limit_exceeded',
@@ -957,7 +1012,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     let savedTokens = 0;
     if (action === 'optimize') {
         const cleanMsgs = contextReport.cleanMessages;
-        const lastUserIdx = cleanMsgs.map(m => m.role).lastIndexOf('user');
+        const lastUserIdx = cleanMsgs.map((m) => m.role).lastIndexOf('user');
         // Re-serialize back to provider schema while preserving non-text blocks
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
@@ -1005,10 +1060,18 @@ async function handleInterception(provider, targetUrl, request, reply) {
         finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
         // Optimize tool schemas and expose tools via routing if tools are present
         if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
-            finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
-            finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
-            // Re-parse to count final token savings accurately
-            finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+            try {
+                finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
+                finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
+                // Re-parse to count final token savings accurately
+                finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+            }
+            catch (err) {
+                console.error("[TokenWall Gateway] Tool optimization failed, falling open:", err.message);
+                // Tool array might be corrupted if it failed halfway, so we can try to fall back to the original
+                finalRequestBody.tools = request.body.tools;
+                finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
+            }
         }
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
