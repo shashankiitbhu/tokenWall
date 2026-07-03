@@ -30,7 +30,7 @@ exports.PRICING_DIRECTORY = {
     'gpt-4-turbo': { inputPerMillion: 10.00, outputPerMillion: 30.00, contextWindow: 128000 },
     'gpt-3.5-turbo': { inputPerMillion: 0.50, outputPerMillion: 1.50, contextWindow: 16385 },
     // Gemini 2026 Models
-    'gemini-3.5-flash': { inputPerMillion: 1.50, outputPerMillion: 9.00, contextWindow: 1000000 },
+    'gemini-3.5-flash': { inputPerMillion: 0.75, outputPerMillion: 4.50, contextWindow: 1000000 },
     'gemini-3.1-pro': { inputPerMillion: 1.25, outputPerMillion: 5.00, contextWindow: 2000000 },
     'gemini-2.5-flash-lite': { inputPerMillion: 0.10, outputPerMillion: 0.40, contextWindow: 1000000 },
     'gemini-2.5-flash': { inputPerMillion: 0.30, outputPerMillion: 2.50, contextWindow: 1000000 },
@@ -54,6 +54,12 @@ function countTokens(text, model) {
 }
 function estimateRequestTokens(req) {
     let total = 0;
+    if (req.systemInstruction) {
+        total += countTokens(req.systemInstruction, req.model);
+    }
+    if (req.toolsSchemaText) {
+        total += countTokens(req.toolsSchemaText, req.model);
+    }
     for (const msg of req.messages) {
         total += countTokens(msg.content, req.model);
         total += 4; // message packaging overhead

@@ -11,6 +11,8 @@ export interface NormalizedRequest {
     stream: boolean;
     toolsAttached: boolean;
     rawBody: any;
+    systemInstruction?: string;
+    toolsSchemaText?: string;
 }
 export interface NormalizedResponse {
     id: string;

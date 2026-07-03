@@ -19,6 +19,11 @@ let daemonCrashCount = 0;
 let isSpawning = false;
 let intentionalStop = false;
 
+// Task Savings Tracking
+let previousSavedTokens = 0;
+let accumulatedTaskTokens = 0;
+let taskIdleTimer: NodeJS.Timeout | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('TokenWall VS Code companion extension is now active.');
 
@@ -648,6 +653,7 @@ async function fetchStatsAndUpdateUI() {
         dailyLimit: number;
         preventedSpend: number;
         optimizedSavings: number;
+        savedTokens: number;
       };
       
       const totalSaved = summary.preventedSpend + summary.optimizedSavings;
@@ -661,6 +667,27 @@ async function fetchStatsAndUpdateUI() {
         color = 'yellow';
       }
       updateStatusBarText(text, color);
+      
+      // Task Accumulator logic
+      if (summary.savedTokens > previousSavedTokens) {
+        // If this is the first time, don't show a massive toast of historic savings
+        if (previousSavedTokens > 0) {
+          const delta = summary.savedTokens - previousSavedTokens;
+          accumulatedTaskTokens += delta;
+          
+          if (taskIdleTimer) clearTimeout(taskIdleTimer);
+          
+          // Wait 15 seconds after the last savings bump before showing the toast
+          taskIdleTimer = setTimeout(() => {
+            if (accumulatedTaskTokens > 0) {
+              vscode.window.showInformationMessage(`TokenWall saved you ${accumulatedTaskTokens.toLocaleString()} tokens on your last AI task!`);
+              accumulatedTaskTokens = 0;
+            }
+          }, 15000);
+        }
+        previousSavedTokens = summary.savedTokens;
+      }
+
     }
   } catch {
     updateStatusBarText('Offline', 'red');

@@ -12,6 +12,8 @@ export interface NormalizedRequest {
   stream: boolean;
   toolsAttached: boolean;
   rawBody: any;
+  systemInstruction?: string;
+  toolsSchemaText?: string;
 }
 
 export interface NormalizedResponse {
@@ -31,6 +33,10 @@ export class ProviderRegistry {
         role: m.role || 'user',
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
       }));
+      const systemMsg = (body.messages || []).find((m: any) => m.role === 'system');
+      const systemInstruction = systemMsg ? (typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content)) : undefined;
+      const toolsSchemaText = (body.tools && body.tools.length > 0) ? JSON.stringify(body.tools) : undefined;
+      
       return {
         provider: 'openai',
         model: body.model || 'unknown',
@@ -39,7 +45,9 @@ export class ProviderRegistry {
         maxTokens: body.max_tokens,
         stream: !!body.stream,
         toolsAttached: !!(body.tools && body.tools.length > 0),
-        rawBody: body
+        rawBody: body,
+        systemInstruction,
+        toolsSchemaText
       };
     }
 
@@ -65,6 +73,9 @@ export class ProviderRegistry {
           content: contentStr
         };
       });
+      const systemInstruction = body.system ? (typeof body.system === 'string' ? body.system : JSON.stringify(body.system)) : undefined;
+      const toolsSchemaText = (body.tools && body.tools.length > 0) ? JSON.stringify(body.tools) : undefined;
+
       return {
         provider: 'anthropic',
         model: body.model || 'unknown',
@@ -73,7 +84,9 @@ export class ProviderRegistry {
         maxTokens: body.max_tokens,
         stream: !!body.stream,
         toolsAttached: !!(body.tools && body.tools.length > 0),
-        rawBody: body
+        rawBody: body,
+        systemInstruction,
+        toolsSchemaText
       };
     }
 
@@ -95,6 +108,9 @@ export class ProviderRegistry {
         messages.push({ role, content: partsText });
       }
 
+      const systemInstruction = body.systemInstruction ? JSON.stringify(body.systemInstruction) : undefined;
+      const toolsSchemaText = (body.tools && body.tools.length > 0) ? JSON.stringify(body.tools) : undefined;
+
       const config = body.generationConfig || {};
       return {
         provider: 'gemini',
@@ -104,7 +120,9 @@ export class ProviderRegistry {
         maxTokens: config.maxOutputTokens,
         stream: urlPath ? urlPath.includes('stream') : false,
         toolsAttached: !!(body.tools && body.tools.length > 0),
-        rawBody: body
+        rawBody: body,
+        systemInstruction,
+        toolsSchemaText
       };
     }
 
