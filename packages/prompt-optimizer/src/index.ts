@@ -1,4 +1,5 @@
 import { countTokens } from '@tokenwall/estimators';
+import { CodeCompressor } from './code-compressor';
 
 export interface OptimizationResult {
   originalText: string;
@@ -128,6 +129,9 @@ export class PromptOptimizer {
     
     // First apply JSON minification
     let optimized = minifyJsonBlocks(prompt);
+    
+    // Apply AST-based Skeletonization and Sparsification
+    optimized = CodeCompressor.compress(optimized);
 
     // Apply Context Deduplication
     optimized = deduplicateContext(optimized);

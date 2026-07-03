@@ -20,6 +20,9 @@ TokenWall sits between your local development terminal and the upstream model AP
 - **Headless Mode**: Tailored policies for CI/CD environments (auto-approve small tasks, auto-deny large spikes, budget-aware routing).
 - **Context Optimizer & Reversible Compression (CCR)**: Identifies and compresses token waste like lockfiles, node_modules references, logs, and binary payloads. Supports:
   - **ML-Based Content Detection (Magika)**: Integrates Google's Magika deep learning model to accurately detect raw/unstructured files (JSON, JS, Python, logs) dumped in messages without markdown fences, automatically routing them to the correct compressor.
+  - **AST-Based Code Sparsification (Headroom-style)**: Utilizes the official TypeScript Compiler API to detect, parse, and heavily compress massive embedded JavaScript/TypeScript code blocks.
+    - **Skeletonization**: Strips out function bodies of large methods (> 10 lines) replacing them with a tiny stub, allowing the LLM to map out the entire repo using 1/10th of the tokens without losing structural relationships.
+    - **Minification Penalty Avoidance**: Regenerates the compressed AST back into a pristine, standard-indented string to guarantee maximum efficiency with LLM tokenizers (avoiding the token-bloat penalties of squashed/minified strings).
   - **AST Structure Masking (SmartJsonCrusher)**: Replaces simple stringifiers with an AST parser that creates a structure mask to truncate arrays > 3 items and strings > 200 characters.
   - **Entropy-Aware Preservation**: Automatically detects high-entropy identifiers (like UUIDs, JWTs, date formats) and bypasses string truncation so the LLM doesn't lose critical context ids.
   - **Reversible Context Compression (CCR)**: Dynamically registers a local `tokenwall_retrieve_content` tool on the upstream request so the LLM can losslessly retrieve the full uncompressed data if needed.

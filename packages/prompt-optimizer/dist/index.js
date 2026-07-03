@@ -16,6 +16,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PromptOptimizer = void 0;
 const estimators_1 = require("@tokenwall/estimators");
+const code_compressor_1 = require("./code-compressor");
 const CONVERSATIONAL_FILLERS = [
     // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
     { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },
@@ -86,7 +87,7 @@ function minifyJsonBlocks(text) {
                 return obj;
             };
             // JSON.stringify inherently removes all redundant whitespace
-            return `\`\`\`json\n${JSON.stringify(walk(parsed))}\n\`\`\``;
+            return `\`\`\`json\n${JSON.stringify(walk(parsed), null, 2)}\n\`\`\``;
         }
         catch {
             return match;
@@ -131,6 +132,8 @@ class PromptOptimizer {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         // First apply JSON minification
         let optimized = minifyJsonBlocks(prompt);
+        // Apply AST-based Skeletonization and Sparsification
+        optimized = code_compressor_1.CodeCompressor.compress(optimized);
         // Apply Context Deduplication
         optimized = deduplicateContext(optimized);
         // Apply filler regexes
@@ -138,7 +141,7 @@ class PromptOptimizer {
             optimized = optimized.replace(item.pattern, item.replacement);
         }
         // Clean up double spaces left over from replacements without destroying newlines
-        optimized = optimized.replace(/ {2,}/g, ' ');
+        // WARNING: Do NOT use `/ {2,}/g` to strip spaces, as it destroys code/XML indentation and causes LLM token bloat!
         // Collapse 3+ newlines into double newlines to save tokens without losing paragraph structure
         optimized = optimized.replace(/\n{3,}/g, '\n\n').trim();
         const optimizedTokens = (0, estimators_1.countTokens)(optimized, model);
