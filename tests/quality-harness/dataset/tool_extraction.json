@@ -1,0 +1,35 @@
+{
+  "name": "Tool Extraction from Logs",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful coding assistant. You can use tools to read files."
+      },
+      {
+        "role": "user",
+        "content": "I am getting some errors in my logs. Please read the relevant files mentioned in the logs to see what's wrong.\\n\\nLog Output:\\n2026-06-17T18:00:01Z [INFO] Initializing server on port 8080\\n2026-06-17T18:00:02Z [DEBUG] Loaded configs\\n2026-06-17T18:00:07Z [ERROR] Failed to fetch user profile from auth service, retrying...\\n  at fetchUserProfile (/app/src/auth.js:25:9)\\n  at processTicksAndRejections (internal/process/task_queues.js:97:5)\\n2026-06-17T18:00:08Z [ERROR] Database connection dropped\\n  at connect (/app/src/db.js:12:3)\\n2026-06-17T18:00:10Z [INFO] System standby"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "read_file",
+          "description": "Reads the content of a file.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" }
+            },
+            "required": ["path"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should use the `read_file` tool to read `/app/src/auth.js` and/or `/app/src/db.js` since those are the files mentioned in the ERROR logs."
+}

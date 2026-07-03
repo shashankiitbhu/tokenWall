@@ -1,0 +1,37 @@
+{
+  "name": "Code Refactor in Large File",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Use the replace_file_content tool to fix bugs."
+      },
+      {
+        "role": "user",
+        "content": "Can you fix the missing error handling in the `fetchUserProfile` function?\n\n```javascript\n// Some comments here\nconst MAX_RETRIES = 3;\nconst TIMEOUT = 5000;\n\nfunction fetchUserProfile(userId) {\n  return fetch(`/api/users/${userId}`).then(res => res.json());\n}\n\nfunction calculateStats() {\n  return [1,2,3].reduce((a,b) => a+b, 0);\n}\n```"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "replace_file_content",
+          "description": "Replaces content in a file.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "target_content": { "type": "string" },
+              "replacement_content": { "type": "string" }
+            },
+            "required": ["path", "target_content", "replacement_content"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should invoke the `replace_file_content` tool targeting `fetchUserProfile` to add a `.catch()` block or a `try/catch` equivalent for error handling."
+}
