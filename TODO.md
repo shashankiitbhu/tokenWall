@@ -29,7 +29,7 @@
 ## 1. High Priority (Must Have for MVP)
 - `[x]` **Regression harness (quality evaluation)**
 - `[ ]` **`cache_control` breakpoint injection**
-- `[ ]` **Diff-based context updates**
+- `[x]` **Diff-based context updates**
 - `[ ]` **Metrics/observability surface**
 - `[ ]` **Multi-extension adapters (Cline + Roo minimum, Continue stretch)**
 - `[ ]` **Privacy/data-handling statement + local-only mode**

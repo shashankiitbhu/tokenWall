@@ -4,10 +4,14 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
+    "@swc/core": "^1.7.0",
     "@tokenwall/core": "file:../core",
     "@tokenwall/estimators": "file:../estimators",
     "@tokenwall/providers": "file:../providers",
-    "@swc/core": "^1.7.0",
+    "diff": "^9.0.0",
     "magika": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.2"
   }
 }

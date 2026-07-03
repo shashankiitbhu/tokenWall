@@ -40,7 +40,7 @@ exports.ContextWindowManager = exports.ContextAnalyzer = exports.CodeCompressor 
 const estimators_1 = require("@tokenwall/estimators");
 const swc = __importStar(require("@swc/core"));
 const cache_aligner_1 = require("./cache-aligner");
-const crypto = __importStar(require("crypto"));
+const Diff = __importStar(require("diff"));
 __exportStar(require("./cache-aligner"), exports);
 __exportStar(require("./importance"), exports);
 __exportStar(require("./query-analyzer"), exports);
@@ -163,6 +163,7 @@ class ContextAnalyzer {
         const cleanMessages = JSON.parse(JSON.stringify(req.messages));
         const cachedContents = [];
         const fileShadowState = new Map();
+        const MAX_DIFF_HOPS = 3;
         let deduplicationsApplied = 0;
         // Stage 5: Query-Aware Extraction
         const queryKeywords = query_analyzer_1.QueryAnalyzer.extractFromMessages(cleanMessages);
@@ -206,17 +207,18 @@ class ContextAnalyzer {
                     }
                 }
             }
-            // 0.5 Intra-Payload File Deduplication
-            const fileBlockRegex = /(?:File|Path|Filename):\s*([/\\]?[^\s"']+)\n(?:```[a-z]*\n)?([\s\S]*?)(?:\n```|$)/gi;
-            let fileMatch;
-            while ((fileMatch = fileBlockRegex.exec(content)) !== null) {
-                const fullMatch = fileMatch[0];
-                const filePath = fileMatch[1];
-                const fileContent = fileMatch[2];
-                const hash = crypto.createHash('sha256').update(fileContent).digest('hex');
-                const previousHash = fileShadowState.get(filePath);
-                if (previousHash === hash) {
-                    const replacement = `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
+            // 0.5 Intra-Payload File Deduplication and Diffing
+            // Detect Markdown-style fencing
+            const mdFileBlockRegex = /(?:File|Path|Filename):\s*([/\\]?[^\s"']+)\n(?:```[a-zA-Z0-9_-]*\n)?([\s\S]*?)(?:\n```|$)/gi;
+            // Detect XML-style fencing (Cline)
+            const xmlFileBlockRegex = /<file_content path="([^"]+)">\n?([\s\S]*?)\n?<\/file_content>/gi;
+            const processFileBlock = (fullMatch, filePath, fileContent, regex, format) => {
+                const state = fileShadowState.get(filePath);
+                let replacement = '';
+                if (state && state.content === fileContent) {
+                    replacement = format === 'xml'
+                        ? `<file_content path="${filePath}">\n[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]\n</file_content>`
+                        : `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
                     const beforeTokens = (0, estimators_1.countTokens)(fullMatch, req.model);
                     const afterTokens = (0, estimators_1.countTokens)(replacement, req.model);
                     const saved = Math.max(0, beforeTokens - afterTokens);
@@ -231,13 +233,53 @@ class ContextAnalyzer {
                         totalWasteTokens += saved;
                         deduplicationsApplied++;
                         content = content.replace(fullMatch, replacement);
-                        // Adjust regex index since we replaced the content
-                        fileBlockRegex.lastIndex -= (fullMatch.length - replacement.length);
+                        regex.lastIndex -= (fullMatch.length - replacement.length);
+                    }
+                }
+                else if (state && state.hops < MAX_DIFF_HOPS) {
+                    try {
+                        // Generate unified diff
+                        const patch = Diff.createPatch(filePath, state.content, fileContent, '', '', { context: 1 });
+                        replacement = format === 'xml'
+                            ? `<file_content path="${filePath}">\n[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\`\n</file_content>`
+                            : `[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\``;
+                        const beforeTokens = (0, estimators_1.countTokens)(fullMatch, req.model);
+                        const diffTokens = (0, estimators_1.countTokens)(replacement, req.model);
+                        if (diffTokens < beforeTokens) {
+                            const saved = beforeTokens - diffTokens;
+                            inefficiencies.push({
+                                type: 'duplicate',
+                                description: `File update diff-compressed for: ${filePath} (${state.hops + 1} hops)`,
+                                target: filePath,
+                                approximateTokens: saved,
+                                potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
+                            });
+                            totalWasteTokens += saved;
+                            content = content.replace(fullMatch, replacement);
+                            regex.lastIndex -= (fullMatch.length - replacement.length);
+                            fileShadowState.set(filePath, { content: fileContent, hops: state.hops + 1 });
+                        }
+                        else {
+                            // Diff is larger than full file, fall back to full file
+                            fileShadowState.set(filePath, { content: fileContent, hops: 0 });
+                        }
+                    }
+                    catch (e) {
+                        // Fallback on diff failure
+                        fileShadowState.set(filePath, { content: fileContent, hops: 0 });
                     }
                 }
                 else {
-                    fileShadowState.set(filePath, hash);
+                    // New file or exceeded hop limit (reanchor)
+                    fileShadowState.set(filePath, { content: fileContent, hops: 0 });
                 }
+            };
+            let match;
+            while ((match = mdFileBlockRegex.exec(content)) !== null) {
+                processFileBlock(match[0], match[1], match[2], mdFileBlockRegex, 'md');
+            }
+            while ((match = xmlFileBlockRegex.exec(content)) !== null) {
+                processFileBlock(match[0], match[1], match[2], xmlFileBlockRegex, 'xml');
             }
             // 1. Lockfiles detection
             const lockfileMatch = content.match(/(?:File|path|Filename|attachment):\s*([a-zA-Z0-9_\-\.\/]*lock\.[a-z]+|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)/gi);
