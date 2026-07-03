@@ -159,6 +159,16 @@ function App() {
     ? Math.min(100, (monthlyBudget.current_spend / monthlyBudget.limit_amount) * 100)
     : 0;
 
+  // Financial Impact Calculations
+  const totalAttemptedSpend = summary ? summary.dailySpend + summary.preventedSpend + summary.optimizedSavings : 0;
+  const spendPct = totalAttemptedSpend > 0 ? (summary!.dailySpend / totalAttemptedSpend) * 100 : 0;
+  const preventedPct = totalAttemptedSpend > 0 ? (summary!.preventedSpend / totalAttemptedSpend) * 100 : 0;
+  const optimizedPct = totalAttemptedSpend > 0 ? (summary!.optimizedSavings / totalAttemptedSpend) * 100 : 0;
+
+  // Max calculations for inline bars
+  const maxModelCalls = summary && summary.models.length > 0 ? Math.max(...summary.models.map(m => m.request_count)) : 1;
+  const maxProviderCalls = summary && summary.providers.length > 0 ? Math.max(...summary.providers.map(p => p.request_count)) : 1;
+
   return (
     <div className="dashboard-container">
       <header className="dashboard-header">
@@ -228,6 +238,39 @@ function App() {
           </span>
         </div>
       </section>
+
+      {/* Financial Impact Stacked Bar */}
+      {totalAttemptedSpend > 0 && (
+        <section className="card" style={{ padding: '24px' }}>
+          <div style={{ marginBottom: '16px' }}>
+            <span className="card-title">Financial Impact</span>
+            <div className="body-md" style={{ color: 'var(--on-surface-variant)', marginTop: '4px' }}>
+              Total attempted value: ${totalAttemptedSpend.toFixed(4)}
+            </div>
+          </div>
+          
+          <div className="stacked-bar-container">
+            {spendPct > 0 && <div className="stacked-segment segment-spend" style={{ width: `${spendPct}%` }} title={`Actual Spend: $${summary!.dailySpend.toFixed(4)}`} />}
+            {preventedPct > 0 && <div className="stacked-segment segment-prevented" style={{ width: `${preventedPct}%` }} title={`Prevented Spend: $${summary!.preventedSpend.toFixed(4)}`} />}
+            {optimizedPct > 0 && <div className="stacked-segment segment-optimized" style={{ width: `${optimizedPct}%` }} title={`Optimized Savings: $${summary!.optimizedSavings.toFixed(4)}`} />}
+          </div>
+          
+          <div className="stacked-legend">
+            <div className="legend-item">
+              <div className="legend-dot" style={{ backgroundColor: 'var(--surface-tint)' }} />
+              <span>Actual Spend ({spendPct.toFixed(1)}%)</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-dot" style={{ backgroundColor: 'var(--error)' }} />
+              <span>Prevented Runaways ({preventedPct.toFixed(1)}%)</span>
+            </div>
+            <div className="legend-item">
+              <div className="legend-dot" style={{ backgroundColor: 'var(--secondary)' }} />
+              <span>Optimized Savings ({optimizedPct.toFixed(1)}%)</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="main-grid">
         {/* Left column: Budgets and Session List */}
@@ -410,7 +453,14 @@ function App() {
                             <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 600 }}>
                               {m.model}
                             </td>
-                            <td>{m.request_count}</td>
+                            <td>
+                              <div className="inline-bar-container">
+                                <span style={{ width: '30px' }}>{m.request_count}</span>
+                                <div className="inline-bar-track">
+                                  <div className="inline-bar-fill bar-secondary" style={{ width: `${(m.request_count / maxModelCalls) * 100}%` }} />
+                                </div>
+                              </div>
+                            </td>
                             <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                               ${m.total_spend.toFixed(4)}
                             </td>
@@ -443,7 +493,14 @@ function App() {
                             <td style={{ textTransform: 'capitalize', fontWeight: 600 }}>
                               {p.provider}
                             </td>
-                            <td>{p.request_count}</td>
+                            <td>
+                              <div className="inline-bar-container">
+                                <span style={{ width: '30px' }}>{p.request_count}</span>
+                                <div className="inline-bar-track">
+                                  <div className="inline-bar-fill" style={{ width: `${(p.request_count / maxProviderCalls) * 100}%` }} />
+                                </div>
+                              </div>
+                            </td>
                             <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                               ${p.total_spend.toFixed(4)}
                             </td>
