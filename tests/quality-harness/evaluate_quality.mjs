@@ -7,39 +7,97 @@ import { PromptOptimizer } from '../../packages/prompt-optimizer/dist/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const TARGET_MODEL = 'gpt-4o-mini';
-const JUDGE_MODEL = 'gpt-4o'; // Or another capable model for evaluation
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TARGET_MODEL = 'gemini-3.5-flash';
+const JUDGE_MODEL = 'gemini-3.1-pro-preview';
 
-if (!OPENAI_API_KEY) {
-  console.error("❌ Error: OPENAI_API_KEY environment variable is required.");
+if (!GEMINI_API_KEY) {
+  console.error("❌ Error: GEMINI_API_KEY environment variable is required.");
   process.exit(1);
 }
 
 async function callLLM(model, messages, tools) {
-  const payload = {
-    model: model,
-    messages: messages,
-  };
-  if (tools && tools.length > 0) {
-    payload.tools = tools;
+  const systemMsg = messages.find(m => m.role === 'system');
+  const otherMsgs = messages.filter(m => m.role !== 'system');
+
+  const contents = otherMsgs.map(m => {
+    let role = m.role === 'assistant' ? 'model' : m.role;
+    let parts = [];
+    if (m.role === 'tool') {
+      role = 'user';
+      parts = [{
+        functionResponse: { name: m.name || 'unknown_tool', response: { result: m.content } }
+      }];
+    } else {
+      if (m.content) parts.push({ text: m.content });
+      if (m.tool_calls) {
+        for (const tc of m.tool_calls) {
+          let args = {};
+          try { args = JSON.parse(tc.function.arguments); } catch (e) { }
+          parts.push({
+            functionCall: { name: tc.function.name, args }
+          });
+        }
+      }
+    }
+    return { role, parts };
+  });
+
+  const payload = { contents };
+  if (systemMsg) {
+    payload.systemInstruction = { parts: [{ text: systemMsg.content }] };
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  if (tools && tools.length > 0) {
+    const functionDeclarations = tools.map(t => {
+      const props = {};
+      if (t.function.parameters?.properties) {
+        for (const [k, v] of Object.entries(t.function.parameters.properties)) {
+          props[k] = { type: (v.type || 'STRING').toUpperCase(), description: v.description };
+        }
+      }
+      return {
+        name: t.function.name,
+        description: t.function.description,
+        parameters: { type: 'OBJECT', properties: props, required: t.function.parameters?.required || [] }
+      };
+    });
+    payload.tools = [{ functionDeclarations }];
+  }
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENAI_API_KEY}`
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
 
+  const resBody = await res.json();
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`OpenAI API Error: ${res.status} ${errText}`);
+    throw new Error(`Gemini API Error: ${res.status} ${JSON.stringify(resBody)}`);
   }
 
-  return await res.json();
+  if (!resBody.candidates || resBody.candidates.length === 0) {
+    return { choices: [{ message: { content: "" } }] };
+  }
+
+  const part = resBody.candidates[0].content?.parts?.[0] || {};
+  if (part.functionCall) {
+    return {
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            function: {
+              name: part.functionCall.name,
+              arguments: JSON.stringify(part.functionCall.args)
+            }
+          }]
+        }
+      }]
+    };
+  }
+
+  return { choices: [{ message: { content: part.text || "" } }] };
 }
 
 async function runJudge(fixture, agentRequest, agentResponse) {
@@ -81,7 +139,7 @@ async function runEvaluation() {
 
   const datasetPath = path.join(__dirname, 'dataset');
   const files = await fs.readdir(datasetPath);
-  
+
   const analyzer = new ContextAnalyzer();
   const optimizer = new PromptOptimizer();
 
@@ -92,7 +150,7 @@ async function runEvaluation() {
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
     totalTests++;
-    
+
     console.log(`▶️ Evaluating fixture: ${file}`);
     const fixtureData = await fs.readFile(path.join(datasetPath, file), 'utf-8');
     const fixture = JSON.parse(fixtureData);
@@ -102,12 +160,13 @@ async function runEvaluation() {
     // 1. Run TokenWall optimization pipeline
     console.log('   Running context optimizations...');
     // We pass the raw request through ContextAnalyzer
-    const analyzerReport = analyzer.analyze({
+    const analyzerReport = await analyzer.analyze({
       provider: rawRequest.provider,
       model: rawRequest.model,
       messages: rawRequest.messages,
       stream: rawRequest.stream,
       toolsAttached: rawRequest.tools && rawRequest.tools.length > 0,
+      toolsSchemaText: (rawRequest.tools && rawRequest.tools.length > 0) ? JSON.stringify(rawRequest.tools) : undefined,
       rawBody: rawRequest
     }, {
       codeCompression: true,
@@ -115,15 +174,19 @@ async function runEvaluation() {
       importance: { policy: 'balanced' }
     });
 
+    const hasEditTools = rawRequest.tools && rawRequest.tools.some(t => 
+      ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t.function.name)
+    );
+
     const optimizedMessages = analyzerReport.cleanMessages.map(m => ({
       role: m.role,
-      content: optimizer.optimize(m.content, TARGET_MODEL).optimizedText
+      content: optimizer.optimize(m.content, TARGET_MODEL, { disableCodeCompression: hasEditTools }).optimizedText
     }));
 
     // 2. Query target model with OPTIMIZED payload
     console.log('   Querying target LLM with optimized payload...');
     const optResponse = await callLLM(TARGET_MODEL, optimizedMessages, rawRequest.tools);
-    
+
     // 3. Query target model with RAW payload (Control)
     console.log('   Querying target LLM with raw payload (Control)...');
     const rawResponse = await callLLM(TARGET_MODEL, rawRequest.messages, rawRequest.tools);
@@ -138,7 +201,7 @@ async function runEvaluation() {
 
     console.log(`\n   [Control] Pass: ${rawJudge.pass} | Reason: ${rawJudge.reasoning}`);
     console.log(`   [Optimized] Pass: ${optJudge.pass} | Reason: ${optJudge.reasoning}`);
-    
+
     if (rawJudge.pass && !optJudge.pass) {
       console.log('   ⚠️ REGRESSION DETECTED: Control passed but optimized failed.');
     } else if (!rawJudge.pass && !optJudge.pass) {
@@ -153,7 +216,7 @@ async function runEvaluation() {
   console.log(`Total Fixtures: ${totalTests}`);
   console.log(`Control Pass Rate: ${((controlPasses / totalTests) * 100).toFixed(1)}%`);
   console.log(`Optimized Pass Rate: ${((optimizedPasses / totalTests) * 100).toFixed(1)}%`);
-  
+
   if (optimizedPasses < controlPasses) {
     console.error('❌ OVERALL REGRESSION DETECTED. Optimizations are degrading task success.');
     process.exit(1);

@@ -152,7 +152,7 @@ function countGeminiContentsTokens(contents, model) {
     }
     return total;
 }
-function getOptimizedMessages(originalMessages, cleanMessages, model) {
+function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression) {
     if (!originalMessages)
         return originalMessages;
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -163,7 +163,7 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
             continue;
         let newText = cleanMsg.content;
         if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-            const opt = promptOptimizer.optimize(newText, model);
+            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
             newText = opt.optimizedText;
         }
         else if (cleanMsg.role === 'tool') {
@@ -214,7 +214,7 @@ function getOptimizedMessages(originalMessages, cleanMessages, model) {
     }
     return newMessages;
 }
-function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
+function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression) {
     if (!originalContents)
         return originalContents;
     const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -225,7 +225,7 @@ function getOptimizedGeminiContents(originalContents, cleanMessages, model) {
             continue;
         let newText = cleanMsg.content;
         if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-            const opt = promptOptimizer.optimize(newText, model);
+            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
             newText = opt.optimizedText;
         }
         if (Array.isArray(origContent.parts)) {
@@ -312,8 +312,17 @@ function injectCCRTool(provider, body) {
         });
     }
 }
-function injectVerbositySteering(provider, body) {
-    const steeringMsg = "Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.";
+function injectSystemInstructions(provider, body, config, contextReport) {
+    let instructions = [];
+    if (config.verbositySteering !== false) {
+        instructions.push("Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.");
+    }
+    if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
+        instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
+    }
+    if (instructions.length === 0)
+        return;
+    const steeringMsg = instructions.join("\n\n");
     if (provider === 'openai') {
         if (!body.messages)
             body.messages = [];
@@ -794,10 +803,11 @@ async function handleInterception(provider, targetUrl, request, reply) {
     // Prompt Optimization (heuristic compression preview)
     const userMessages = parsedRequest.messages.filter(m => m.role === 'user');
     const lastUserMsg = userMessages[userMessages.length - 1];
+    const hasEditTools = request.body.tools && request.body.tools.some((t) => ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name));
     // We apply prompt optimizer to ALL user messages in getOptimizedMessages later.
     // For telemetry/preview purposes, we just run it on the last user message to see if there's any immediate savings.
     const optimization = lastUserMsg
-        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model)
+        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
         : undefined;
     // Run loop detector
     const loopCheck = loopDetector.detect(sessionId, lastUserMsg ? lastUserMsg.content : '', estimation.estimatedInputTokens);
@@ -952,19 +962,19 @@ async function handleInterception(provider, targetUrl, request, reply) {
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model)
+                messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools)
             };
             // Optimize top-level Anthropic system prompt
             if (provider === 'anthropic' && finalRequestBody.system) {
                 if (typeof finalRequestBody.system === 'string') {
-                    finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model).optimizedText;
+                    finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText;
                 }
                 else if (Array.isArray(finalRequestBody.system)) {
                     finalRequestBody.system = finalRequestBody.system.map((block) => {
                         if (block && block.type === 'text' && typeof block.text === 'string') {
                             return {
                                 ...block,
-                                text: promptOptimizer.optimize(block.text, parsedRequest.model).optimizedText
+                                text: promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
                             };
                         }
                         return block;
@@ -975,7 +985,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model)
+                contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools)
             };
             // Optimize top-level Gemini systemInstruction
             if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
@@ -983,7 +993,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
                     if (part && typeof part.text === 'string') {
                         return {
                             ...part,
-                            text: promptOptimizer.optimize(part.text, parsedRequest.model).optimizedText
+                            text: promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
                         };
                     }
                     return part;
@@ -1082,10 +1092,8 @@ async function handleInterception(provider, targetUrl, request, reply) {
             tokens: 0
         });
     }
-    // Apply Output Token Reduction (Verbosity Steering)
-    if (config.verbositySteering !== false) {
-        injectVerbositySteering(provider, finalRequestBody);
-    }
+    // Apply System Prompt Optimization Instructions
+    injectSystemInstructions(provider, finalRequestBody, config, contextReport);
     // Apply Anthropic Caching Breakpoints
     if (provider === 'anthropic' && config.cacheAlignment !== false) {
         injectAnthropicCacheControl(finalRequestBody);

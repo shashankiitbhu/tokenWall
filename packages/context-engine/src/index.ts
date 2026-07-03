@@ -3,6 +3,7 @@ import { TokenWallConfig } from '@tokenwall/core';
 import { countTokens } from '@tokenwall/estimators';
 import * as swc from '@swc/core';
 import { CacheAlignerPipeline } from './cache-aligner';
+import * as crypto from 'crypto';
 
 export * from './cache-aligner';
 export * from './importance';
@@ -25,6 +26,7 @@ export interface ContextReport {
   cleanMessages: NormalizedRequest['messages'];
   cachedContents: { id: string; content: string }[];
   autoOptimized?: boolean;
+  deduplicationsApplied?: number;
 }
 
 let _magikaInstance: any = null;
@@ -143,20 +145,40 @@ export class ContextAnalyzer {
     let totalWasteTokens = 0;
     const cleanMessages = JSON.parse(JSON.stringify(req.messages)) as NormalizedRequest['messages'];
     const cachedContents: { id: string; content: string }[] = [];
+    const fileShadowState = new Map<string, string>();
+    let deduplicationsApplied = 0;
     
     // Stage 5: Query-Aware Extraction
     const queryKeywords = QueryAnalyzer.extractFromMessages(cleanMessages);
 
-    const isReversible = config?.reversibleCompression !== false;
+    // Tool-Aware Compression Bypass
+    // If edit-capable tools are present, we must preserve exact whitespace, comments, 
+    // and line numbers to prevent silent write-path corruption or tool exact-match failures.
+    const hasEditTools = req.toolsSchemaText && (
+      req.toolsSchemaText.includes('replace_file_content') ||
+      req.toolsSchemaText.includes('insert_at_line') ||
+      req.toolsSchemaText.includes('edit_file') ||
+      req.toolsSchemaText.includes('write_to_file') ||
+      req.toolsSchemaText.includes('apply_diff')
+    );
+    
+    const effectiveConfig = (config ? { ...config } : {}) as any;
+    if (hasEditTools) {
+      effectiveConfig.codeCompression = false;
+      if (!effectiveConfig.importance) effectiveConfig.importance = {};
+      effectiveConfig.importance.policy = 'conservative';
+    }
+
+    const isReversible = effectiveConfig.reversibleCompression !== false;
 
     for (let i = 0; i < cleanMessages.length; i++) {
       const msg = cleanMessages[i];
       let content = msg.content;
 
       // 0. Cache alignment detection & normalization
-      if ((msg.role === 'system' || i === 0) && config?.cacheAlignment !== false) {
+      if ((msg.role === 'system' || i === 0) && effectiveConfig.cacheAlignment !== false) {
         const pipeline = new CacheAlignerPipeline();
-        const alignResult = pipeline.align(content, msg.role, msg.role === 'system', config);
+        const alignResult = pipeline.align(content, msg.role, msg.role === 'system', effectiveConfig);
         
         if (alignResult.prompt !== content) {
           content = alignResult.prompt;
@@ -174,6 +196,43 @@ export class ContextAnalyzer {
               });
             }
           }
+        }
+      }
+
+      // 0.5 Intra-Payload File Deduplication
+      const fileBlockRegex = /(?:File|Path|Filename):\s*([/\\]?[^\s"']+)\n(?:```[a-z]*\n)?([\s\S]*?)(?:\n```|$)/gi;
+      let fileMatch;
+      while ((fileMatch = fileBlockRegex.exec(content)) !== null) {
+        const fullMatch = fileMatch[0];
+        const filePath = fileMatch[1];
+        const fileContent = fileMatch[2];
+        
+        const hash = crypto.createHash('sha256').update(fileContent).digest('hex');
+        const previousHash = fileShadowState.get(filePath);
+        
+        if (previousHash === hash) {
+          const replacement = `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
+          const beforeTokens = countTokens(fullMatch, req.model);
+          const afterTokens = countTokens(replacement, req.model);
+          const saved = Math.max(0, beforeTokens - afterTokens);
+          
+          if (saved > 0) {
+            inefficiencies.push({
+              type: 'duplicate',
+              description: `Intra-payload duplication detected for file: ${filePath}`,
+              target: filePath,
+              approximateTokens: saved,
+              potentialSavingsPercent: 100
+            });
+            totalWasteTokens += saved;
+            deduplicationsApplied++;
+            content = content.replace(fullMatch, replacement);
+            
+            // Adjust regex index since we replaced the content
+            fileBlockRegex.lastIndex -= (fullMatch.length - replacement.length);
+          }
+        } else {
+          fileShadowState.set(filePath, hash);
         }
       }
 
@@ -268,13 +327,13 @@ export class ContextAnalyzer {
       }
 
       // 3.5 Unstructured Log Pruning via Importance Scoring
-      if (config?.importance?.policy && config.importance.policy !== 'conservative' && content.length > 1000) {
+      if (effectiveConfig.importance?.policy && effectiveConfig.importance.policy !== 'conservative' && content.length > 1000) {
         // Only target blocks that look like unstructured logs (lots of lines, not JSON/Code blocks)
         const linesCount = content.split('\n').length;
         if (linesCount > 20 && !content.trim().startsWith('```') && !content.trim().startsWith('{') && !content.trim().startsWith('[')) {
           const importanceEngine = new ImportanceEngine();
           const beforeTokens = countTokens(content, req.model);
-          const prunedContent = importanceEngine.pruneLogBlock(content, config.importance.policy);
+          const prunedContent = importanceEngine.pruneLogBlock(content, effectiveConfig.importance.policy);
           
           if (prunedContent.length < content.length) {
             const afterTokens = countTokens(prunedContent, req.model);
@@ -282,7 +341,7 @@ export class ContextAnalyzer {
             if (saved > 10) {
               inefficiencies.push({
                 type: 'logs',
-                description: `Unstructured log block pruned using '${config.importance.policy}' Importance Policy. Preserved errors/warnings, dropped noise.`,
+                description: `Unstructured log block pruned using '${effectiveConfig.importance.policy}' Importance Policy. Preserved errors/warnings, dropped noise.`,
                 target: 'unstructured_log_block',
                 approximateTokens: saved,
                 potentialSavingsPercent: Math.round((saved / beforeTokens) * 100)
@@ -368,7 +427,7 @@ export class ContextAnalyzer {
       }
 
       // 5. JSON Crushing
-      if (config?.jsonCrushing !== false) {
+      if (effectiveConfig.jsonCrushing !== false) {
         const jsonBlockRegex = /```json\s+([\s\S]*?)\s*```/gi;
         let jsonMatch;
         while ((jsonMatch = jsonBlockRegex.exec(content)) !== null) {
@@ -397,7 +456,7 @@ export class ContextAnalyzer {
       }
 
       // 6. Code Compression
-      if (config?.codeCompression !== false) {
+      if (effectiveConfig.codeCompression !== false) {
         const codeBlockRegex = /```(javascript|typescript|js|ts|python|py|rust|rs|go|golang|cpp|c\+\+|java|c|shell|sh|bash)\s+([\s\S]*?)\s*```/gi;
         let codeMatch;
         while ((codeMatch = codeBlockRegex.exec(content)) !== null) {
@@ -440,7 +499,7 @@ export class ContextAnalyzer {
     }
 
     // 8. Apply Rolling Context Window
-    const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model, undefined, config);
+    const windowResult = ContextWindowManager.fitToBudget(cleanMessages, req.model, undefined, effectiveConfig);
     for (const warning of windowResult.warnings) {
       inefficiencies.push({
         type: 'logs',
@@ -456,7 +515,8 @@ export class ContextAnalyzer {
       totalWasteTokens,
       cachedContents,
       cleanMessages: windowResult.messages,
-      autoOptimized: !!config?.autoOptimize
+      autoOptimized: !!effectiveConfig.autoOptimize,
+      deduplicationsApplied
     };
   }
 }

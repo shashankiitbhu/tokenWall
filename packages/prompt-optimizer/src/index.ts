@@ -8,6 +8,10 @@ export interface OptimizationResult {
   savingsPercent: number;
 }
 
+export interface PromptOptimizerOptions {
+  disableCodeCompression?: boolean;
+}
+
 const CONVERSATIONAL_FILLERS = [
   // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
   { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },
@@ -124,14 +128,16 @@ function deduplicateContext(text: string): string {
 }
 
 export class PromptOptimizer {
-  optimize(prompt: string, model: string): OptimizationResult {
+  optimize(prompt: string, model: string, options?: PromptOptimizerOptions): OptimizationResult {
     const originalTokens = countTokens(prompt, model);
     
     // First apply JSON minification
     let optimized = minifyJsonBlocks(prompt);
     
     // Apply AST-based Skeletonization and Sparsification
-    optimized = CodeCompressor.compress(optimized);
+    if (!options?.disableCodeCompression) {
+      optimized = CodeCompressor.compress(optimized);
+    }
 
     // Apply Context Deduplication
     optimized = deduplicateContext(optimized);

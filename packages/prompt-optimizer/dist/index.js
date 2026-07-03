@@ -128,12 +128,14 @@ function deduplicateContext(text) {
     return output.join('\n\n');
 }
 class PromptOptimizer {
-    optimize(prompt, model) {
+    optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         // First apply JSON minification
         let optimized = minifyJsonBlocks(prompt);
         // Apply AST-based Skeletonization and Sparsification
-        optimized = code_compressor_1.CodeCompressor.compress(optimized);
+        if (!options?.disableCodeCompression) {
+            optimized = code_compressor_1.CodeCompressor.compress(optimized);
+        }
         // Apply Context Deduplication
         optimized = deduplicateContext(optimized);
         // Apply filler regexes

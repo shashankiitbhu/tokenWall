@@ -1,0 +1,37 @@
+{
+  "name": "Line Coordinate Stability",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Use the insert_at_line tool to edit files."
+      },
+      {
+        "role": "user",
+        "content": "File: /app/src/db.js\n```javascript\nimport sqlite3 from 'sqlite3';\n\n\nconst db = new sqlite3.Database(':memory:');\n\n\n\n\nfunction query(sql) {\n  return db.all(sql);\n}\n```\n\nI got this error in my logs:\n`/app/src/db.js:10:3: error: db.all is not a function`\n\nCan you insert a console.log at line 9 to debug?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "insert_at_line",
+          "description": "Inserts content at a specific line.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "line": { "type": "number" },
+              "content": { "type": "string" }
+            },
+            "required": ["path", "line", "content"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should invoke `insert_at_line` exactly at `line: 9`. If it shifts the line number because it saw collapsed empty lines, it fails."
+}

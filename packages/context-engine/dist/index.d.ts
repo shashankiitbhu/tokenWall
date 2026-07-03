@@ -19,6 +19,7 @@ export interface ContextReport {
         content: string;
     }[];
     autoOptimized?: boolean;
+    deduplicationsApplied?: number;
 }
 export declare class JsonCrusher {
     static crush(jsonStr: string): string;

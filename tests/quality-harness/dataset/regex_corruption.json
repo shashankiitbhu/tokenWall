@@ -1,0 +1,37 @@
+{
+  "name": "Regex Corruption Resilience",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Use the replace_file_content tool to edit files."
+      },
+      {
+        "role": "user",
+        "content": "File: /app/src/parser.js\n```javascript\nconst url = \"http://example.com\";     // Example URL\nconst pattern = /a\\/\\/b/;             // Regex with slashes\n\nfunction parseData(data) {\n  return pattern.test(data);\n}\n```\n\nCan you modify `parseData` to always return true?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "replace_file_content",
+          "description": "Replaces content in a file.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "target_content": { "type": "string" },
+              "replacement_content": { "type": "string" }
+            },
+            "required": ["path", "target_content", "replacement_content"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should invoke `replace_file_content` to modify `parseData`. Crucially, if the tool outputs `target_content`, it MUST perfectly preserve the 2-space indentation of `return pattern.test(data);` exactly as it appears in the original prompt."
+}

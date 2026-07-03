@@ -1,0 +1,37 @@
+{
+  "name": "Comment Preservation on Write",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Use the replace_file_content tool to edit files."
+      },
+      {
+        "role": "user",
+        "content": "File: /app/src/utils.js\n```javascript\nfunction calculateTotal(items) {\n  let total = 0;\n  for (let i = 0; i < items.length; i++) {\n    // We must ignore inactive items for tax compliance\n    if (!items[i].active) continue;\n    total += items[i].price;\n  }\n  return total;\n}\n```\n\nCan you add a 5% tax to the `total += items[i].price;` line?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "replace_file_content",
+          "description": "Replaces content in a file.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "target_content": { "type": "string" },
+              "replacement_content": { "type": "string" }
+            },
+            "required": ["path", "target_content", "replacement_content"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should invoke `replace_file_content`. Its `target_content` and `replacement_content` MUST perfectly preserve the comment `// We must ignore inactive items for tax compliance` exactly as it appears in the original prompt. If it hallucinates the comment away, it fails."
+}

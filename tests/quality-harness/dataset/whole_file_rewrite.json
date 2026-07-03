@@ -1,0 +1,36 @@
+{
+  "name": "Whole File Rewrite Comment Preservation",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Use the write_to_file tool to overwrite files."
+      },
+      {
+        "role": "user",
+        "content": "File: /app/src/constants.js\n```javascript\n// Application Constants\n\n// The maximum number of retry attempts for network requests\nexport const MAX_RETRIES = 3;\n\n// The default timeout in milliseconds (5 seconds)\nexport const TIMEOUT = 5000;\n```\n\nCan you completely rewrite this file using write_to_file, but change MAX_RETRIES to 5?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "write_to_file",
+          "description": "Overwrites an entire file with new content.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "content": { "type": "string" }
+            },
+            "required": ["path", "content"]
+          }
+        }
+      }
+    ]
+  },
+  "success_criteria": "The model should invoke `write_to_file` and change MAX_RETRIES to 5. Crucially, the `content` MUST perfectly preserve the 3 descriptive comments exactly as they appear in the original prompt."
+}
