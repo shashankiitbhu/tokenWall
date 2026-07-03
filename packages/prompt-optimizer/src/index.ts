@@ -78,7 +78,7 @@ function minifyJsonBlocks(text: string): string {
         return obj;
       };
       // JSON.stringify inherently removes all redundant whitespace
-      return `\`\`\`json\n${JSON.stringify(walk(parsed))}\n\`\`\``;
+      return `\`\`\`json\n${JSON.stringify(walk(parsed), null, 2)}\n\`\`\``;
     } catch {
       return match;
     }
@@ -138,7 +138,7 @@ export class PromptOptimizer {
     }
 
     // Clean up double spaces left over from replacements without destroying newlines
-    optimized = optimized.replace(/ {2,}/g, ' ');
+    // WARNING: Do NOT use `/ {2,}/g` to strip spaces, as it destroys code/XML indentation and causes LLM token bloat!
     // Collapse 3+ newlines into double newlines to save tokens without losing paragraph structure
     optimized = optimized.replace(/\n{3,}/g, '\n\n').trim();
 
