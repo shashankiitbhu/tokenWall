@@ -97,10 +97,13 @@ const workspaceResolverPlugin = {
       if (builtinModules.includes(bare)) return null;
 
       // Skip explicit externals
-      if (args.path === 'better-sqlite3' || args.path.startsWith('magika') || args.path.startsWith('@swc')) return null;
+      if (args.path === 'better-sqlite3' || 
+          args.path.startsWith('magika') || 
+          args.path.startsWith('@swc') ||
+          args.path.startsWith('tree-sitter')) return null;
 
       // Resolve @tokenwall/* directly to compiled dist
-      if (tokenwallMap[args.path]) {
+      console.log("Resolving: " + args.path); if (tokenwallMap[args.path]) {
         return { path: tokenwallMap[args.path] };
       }
 
@@ -130,7 +133,7 @@ const outFile = path.join(cliDir, 'dist/index.js');
     platform: 'node',
     target: 'node18',
     outfile: outFile,
-    external: ['better-sqlite3', 'magika', 'magika/*', '@swc/core', '@swc/wasm', '@swc/*', '*.node'],
+    external: ['better-sqlite3', 'magika', 'magika/*', '@swc/core', '@swc/wasm', '@swc/*', 'tree-sitter', 'tree-sitter-javascript', 'tree-sitter-typescript', '*.node'],
     format: 'cjs',
     logLevel: 'info',
     plugins: [workspaceResolverPlugin],

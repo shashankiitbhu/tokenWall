@@ -513,7 +513,7 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody)
     }
     return { response, resBody };
 }
-async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation) {
+async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens) {
     let inputAccumulated = 0;
     let outputAccumulated = 0;
     let streamFailed = false;
@@ -769,7 +769,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                 const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
                     ((outputAccumulated / 1000000) * pricing.outputPerMillion);
                 telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
-                db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
+                db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated, savedTokens);
                 const status = streamFailed ? 'failed' : 'success';
                 const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
                 telemetryLogger.reconcileRequest(requestId, finalCost, status, state);
@@ -781,7 +781,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
             telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
             if (inputAccumulated === 0)
                 inputAccumulated = estimation.estimatedInputTokens;
-            db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated || 1);
+            db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated || 1, savedTokens);
             telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'cancelled');
             telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'cancelled' } });
         }
@@ -844,10 +844,18 @@ async function handleInterception(provider, targetUrl, request, reply) {
     let categorySavings = {};
     try {
         attribution = estimators_1.TokenAttributionAnalyzer.analyze(parsedRequest);
+        const contextStr = parsedRequest.messages.map((m) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\\n');
+        let toolPruningSavings = 0;
+        try {
+            toolPruningSavings = prompt_optimizer_1.ToolPruner.pruneTools(provider, request.body, parsedRequest.model, contextStr);
+        }
+        catch (e) {
+            console.error("[TokenWall Gateway] ToolPruner failed:", e.message);
+        }
         categorySavings = {
             'JSON crushing': 0,
             'Log pruning': 0,
-            'Tool pruning': 0,
+            'Tool pruning': toolPruningSavings,
             'Context deduplication': 0,
             'Code compression': 0,
         };
@@ -904,7 +912,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
             { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: hasEditTools ? 'Write-path safety bypass' : null },
             { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']), reason: null },
             { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']), reason: null },
-            { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: 'Tool pruning currently inactive' },
+            { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: categorySavings['Tool pruning'] > 0 ? null : 'Safe heuristics preserved all tools' },
             { name: 'Conversation', count: Math.max(0, attribution.conversationTokens), reason: 'Agent intent preservation' }
         ].sort((a, b) => b.count - a.count);
         const topOpportunity = remain[0];
@@ -1141,21 +1149,9 @@ async function handleInterception(provider, targetUrl, request, reply) {
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
         // Parse the fully optimized body back into a NormalizedRequest to count its exact tokens
         finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-        // Optimize tool schemas and expose tools via routing if tools are present
-        if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
-            try {
-                finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
-                finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
-                // Re-parse to count final token savings accurately
-                finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-            }
-            catch (err) {
-                console.error("[TokenWall Gateway] Tool optimization failed, falling open:", err.message);
-                // Tool array might be corrupted if it failed halfway, so we can try to fall back to the original
-                finalRequestBody.tools = request.body.tools;
-                finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-            }
-        }
+        // We no longer use ToolRouter/ToolSchemaOptimizer here since ToolPruner runs earlier.
+        // Ensure finalRequest is correctly parsed from the optimized finalRequestBody
+        finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
@@ -1281,7 +1277,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 ((normalizedRes.usage.outputTokens / 1000000) * pricing.outputPerMillion);
             telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: normalizedRes.usage } });
             telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
-            db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens);
+            db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens, savedTokens);
             telemetryLogger.reconcileRequest(requestId, totalCost, 'success', 'reconciled');
             telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost: totalCost } });
             return reply.send(resBody);
@@ -1291,7 +1287,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         reply.header('content-type', 'text/event-stream');
         reply.header('cache-control', 'no-cache');
         reply.header('connection', 'keep-alive');
-        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation);
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens);
         return reply.send(stream);
     }
     catch (error) {

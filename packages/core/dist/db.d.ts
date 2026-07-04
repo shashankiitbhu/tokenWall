@@ -71,7 +71,7 @@ export declare class DBManager {
     logEvent(event: Omit<GovernanceEvent, 'created_at'>): void;
     getEventsForSession(sessionId: string): GovernanceEvent[];
     getEventsForRequest(requestId: string): GovernanceEvent[];
-    updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number): void;
+    updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number, savedTokens?: number): void;
     updateRequestRouting(requestId: string, originalModel: string, routingAction: string): void;
     reserveBudget(projectId: string | null, sessionId: string, requestId: string, estimatedCost: number, provider?: string, model?: string, originalModel?: string | null, routingAction?: string | null): {
         allowed: boolean;

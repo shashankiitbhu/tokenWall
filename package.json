@@ -19,7 +19,7 @@
     "build:telemetry": "tsc -p packages/telemetry",
     "build:terminal-ui": "tsc -p packages/terminal-ui",
     "build:gateway": "tsc -p apps/gateway",
-    "build:cli": "tsc -p apps/cli",
+    "build:cli": "node apps/cli/build.js",
     "build:vscode-extension": "tsc -p apps/vscode-extension",
     "build": "npm run build:core && npm run build:providers && npm run build:estimators && npm run build:budget-engine && npm run build:context-engine && npm run build:prompt-optimizer && npm run build:routing-engine && npm run build:telemetry && npm run build:terminal-ui && npm run build:gateway && npm run build:cli && npm run build:vscode-extension",
     "test": "npm run test --workspaces --if-present",

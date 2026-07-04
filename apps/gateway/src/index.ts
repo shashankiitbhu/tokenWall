@@ -7,7 +7,7 @@ import { calculatePreFlightEstimation, getPricingForModel, countTokens, TokenAtt
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
 import { ContextAnalyzer } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
-import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter } from '@tokenwall/prompt-optimizer';
+import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter, ToolPruner } from '@tokenwall/prompt-optimizer';
 import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
@@ -535,7 +535,8 @@ async function proxyStreamWithCCR(
   requestId: string,
   sessionId: string,
   finalModel: string,
-  estimation: any
+  estimation: any,
+  savedTokens: number
 ): Promise<ReadableStream> {
   let inputAccumulated = 0;
   let outputAccumulated = 0;
@@ -780,7 +781,7 @@ async function proxyStreamWithCCR(
                           ((outputAccumulated / 1000000) * pricing.outputPerMillion);
 
         telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
-        db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated);
+        db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated, savedTokens);
         
         const status = streamFailed ? 'failed' : 'success';
         const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
@@ -793,7 +794,7 @@ async function proxyStreamWithCCR(
       streamCancelled = true;
       telemetryLogger.emitEvent({ eventType: 'request_stream_cancelled', sessionId, requestId });
       if (inputAccumulated === 0) inputAccumulated = estimation.estimatedInputTokens;
-      db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated || 1);
+      db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated || 1, savedTokens);
       telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'cancelled');
       telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'cancelled' } });
     }
@@ -873,10 +874,18 @@ async function handleInterception(
 
   try {
     attribution = TokenAttributionAnalyzer.analyze(parsedRequest);
+    const contextStr = parsedRequest.messages.map((m: any) => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\\n');
+    let toolPruningSavings = 0;
+    try {
+      toolPruningSavings = ToolPruner.pruneTools(provider, request.body, parsedRequest.model, contextStr);
+    } catch (e: any) {
+      console.error("[TokenWall Gateway] ToolPruner failed:", e.message);
+    }
+
     categorySavings = {
       'JSON crushing': 0,
       'Log pruning': 0,
-      'Tool pruning': 0,
+      'Tool pruning': toolPruningSavings,
       'Context deduplication': 0,
       'Code compression': 0,
     };
@@ -937,7 +946,7 @@ async function handleInterception(
       { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: hasEditTools ? 'Write-path safety bypass' : null },
       { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']), reason: null },
       { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']), reason: null },
-      { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: 'Tool pruning currently inactive' },
+      { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: categorySavings['Tool pruning'] > 0 ? null : 'Safe heuristics preserved all tools' },
       { name: 'Conversation', count: Math.max(0, attribution.conversationTokens), reason: 'Agent intent preservation' }
     ].sort((a, b) => b.count - a.count);
     
@@ -1214,20 +1223,9 @@ async function handleInterception(
     // Parse the fully optimized body back into a NormalizedRequest to count its exact tokens
     finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
     
-    // Optimize tool schemas and expose tools via routing if tools are present
-    if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
-      try {
-        finalRequestBody.tools = ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
-        finalRequestBody.tools = ToolSchemaOptimizer.optimize(finalRequestBody.tools, false); // false = conservative mode
-        // Re-parse to count final token savings accurately
-        finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-      } catch (err: any) {
-        console.error("[TokenWall Gateway] Tool optimization failed, falling open:", err.message);
-        // Tool array might be corrupted if it failed halfway, so we can try to fall back to the original
-        finalRequestBody.tools = request.body.tools;
-        finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-      }
-    }
+    // We no longer use ToolRouter/ToolSchemaOptimizer here since ToolPruner runs earlier.
+    // Ensure finalRequest is correctly parsed from the optimized finalRequestBody
+    finalRequest = ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
     
     const optimizedEstimation = calculatePreFlightEstimation(finalRequest);
     savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
@@ -1373,7 +1371,7 @@ async function handleInterception(
       telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: normalizedRes.usage } });
       telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
       
-      db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens);
+      db.updateRequestTokens(requestId, normalizedRes.usage.inputTokens, normalizedRes.usage.outputTokens, savedTokens);
       telemetryLogger.reconcileRequest(requestId, totalCost, 'success', 'reconciled');
       telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'reconciled', finalCost: totalCost } });
       
@@ -1394,7 +1392,8 @@ async function handleInterception(
       requestId,
       sessionId,
       finalRequest.model,
-      estimation
+      estimation,
+      savedTokens
     );
 
     return reply.send(stream);

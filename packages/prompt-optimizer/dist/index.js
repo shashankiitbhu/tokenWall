@@ -14,9 +14,11 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PromptOptimizer = void 0;
+exports.ToolPruner = exports.PromptOptimizer = void 0;
 const estimators_1 = require("@tokenwall/estimators");
 const code_compressor_1 = require("./code-compressor");
+const tool_pruner_1 = require("./tool-pruner");
+Object.defineProperty(exports, "ToolPruner", { enumerable: true, get: function () { return tool_pruner_1.ToolPruner; } });
 const CONVERSATIONAL_FILLERS = [
     // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
     { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },

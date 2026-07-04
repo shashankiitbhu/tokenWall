@@ -266,8 +266,8 @@ class DBManager {
     getEventsForRequest(requestId) {
         return this.db.prepare('SELECT * FROM events WHERE request_id = ? ORDER BY created_at ASC').all(requestId);
     }
-    updateRequestTokens(requestId, inputTokens, outputTokens) {
-        this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, requestId);
+    updateRequestTokens(requestId, inputTokens, outputTokens, savedTokens = 0) {
+        this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ?, optimized_tokens_saved = ? WHERE id = ?').run(inputTokens, outputTokens, savedTokens, requestId);
     }
     updateRequestRouting(requestId, originalModel, routingAction) {
         this.db.prepare('UPDATE requests SET original_model = ?, routing_action = ? WHERE id = ?').run(originalModel, routingAction, requestId);

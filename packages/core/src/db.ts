@@ -325,8 +325,8 @@ export class DBManager {
     return this.db.prepare('SELECT * FROM events WHERE request_id = ? ORDER BY created_at ASC').all(requestId) as GovernanceEvent[];
   }
 
-  updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number) {
-    this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ? WHERE id = ?').run(inputTokens, outputTokens, requestId);
+  updateRequestTokens(requestId: string, inputTokens: number, outputTokens: number, savedTokens: number = 0) {
+    this.db.prepare('UPDATE requests SET input_tokens = ?, output_tokens = ?, optimized_tokens_saved = ? WHERE id = ?').run(inputTokens, outputTokens, savedTokens, requestId);
   }
 
   updateRequestRouting(requestId: string, originalModel: string, routingAction: string) {
