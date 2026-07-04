@@ -63,18 +63,21 @@ const CONVERSATIONAL_FILLERS = [
     { pattern: /kindly help me with/gi, replacement: 'resolve' }
 ];
 function minifyJsonBlocks(text) {
-    return text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+    const cachedContents = [];
+    const minified = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
         try {
             const parsed = JSON.parse(jsonString);
             const walk = (obj) => {
                 if (Array.isArray(obj)) {
                     // Array compression
                     if (obj.length > 50) {
+                        const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                        cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
                         return [
                             walk(obj[0]),
                             walk(obj[1]),
                             walk(obj[2]),
-                            `... [TokenWall: ${obj.length - 3} more items truncated]`
+                            `... [TokenWall Reversible Content: ${id} - ${obj.length - 3} more items truncated. Use tokenwall_retrieve_content tool with content_id='${id}']`
                         ];
                     }
                     return obj.map(walk);
@@ -86,6 +89,21 @@ function minifyJsonBlocks(text) {
                     }
                     return newObj;
                 }
+                else if (typeof obj === 'string') {
+                    if (obj.length > 200) {
+                        // Check for high-entropy/structured ID shapes to bypass truncation
+                        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(obj);
+                        const isJWT = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(obj);
+                        const isHex = /^[0-9a-fA-F]{32,}$/.test(obj);
+                        const isBase64 = /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/.test(obj) && !obj.includes(' ');
+                        if (isUUID || isJWT || isHex || isBase64) {
+                            return obj; // Bypass truncation for IDs and tokens
+                        }
+                        const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                        cachedContents.push({ id, content: obj });
+                        return obj.substring(0, 100) + `... [TokenWall Reversible Content: ${id} - string truncated, original length ${obj.length}. Use tokenwall_retrieve_content tool with content_id='${id}'] ...` + obj.substring(obj.length - 100);
+                    }
+                }
                 return obj;
             };
             // JSON.stringify inherently removes all redundant whitespace
@@ -95,6 +113,7 @@ function minifyJsonBlocks(text) {
             return match;
         }
     });
+    return { text: minified, cachedContents };
 }
 /**
  * Context Deduplication:
@@ -132,12 +151,15 @@ function deduplicateContext(text) {
 class PromptOptimizer {
     optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
+        let allCachedContents = [];
         // First apply JSON minification
-        let optimized = minifyJsonBlocks(prompt);
+        const jsonResult = minifyJsonBlocks(prompt);
+        let optimized = jsonResult.text;
+        allCachedContents.push(...jsonResult.cachedContents);
         // Apply AST-based Skeletonization and Sparsification
-        if (!options?.disableCodeCompression) {
-            optimized = code_compressor_1.CodeCompressor.compress(optimized);
-        }
+        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression);
+        optimized = codeResult.optimizedText;
+        allCachedContents.push(...codeResult.cachedContents);
         // Apply Context Deduplication
         optimized = deduplicateContext(optimized);
         // Apply filler regexes
@@ -155,7 +177,8 @@ class PromptOptimizer {
             originalText: prompt,
             optimizedText: optimized,
             tokensSaved,
-            savingsPercent
+            savingsPercent,
+            cachedContents: allCachedContents
         };
     }
 }

@@ -166,7 +166,8 @@ function getOptimizedMessages(
   originalMessages: any[],
   cleanMessages: any[],
   model: string,
-  disableCodeCompression?: boolean
+  disableCodeCompression?: boolean,
+  outCachedContents: any[] = []
 ): any[] {
   if (!originalMessages) return originalMessages;
   const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -180,6 +181,9 @@ function getOptimizedMessages(
       if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
         const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
         newText = opt.optimizedText;
+        if (opt.cachedContents) {
+          outCachedContents.push(...opt.cachedContents);
+        }
       } else if (cleanMsg.role === 'tool') {
         newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
       }
@@ -244,7 +248,8 @@ function getOptimizedGeminiContents(
   originalContents: any[],
   cleanMessages: any[],
   model: string,
-  disableCodeCompression?: boolean
+  disableCodeCompression?: boolean,
+  outCachedContents: any[] = []
 ): any[] {
   if (!originalContents) return originalContents;
   const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -258,6 +263,9 @@ function getOptimizedGeminiContents(
       try {
         const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
         newText = opt.optimizedText;
+        if (opt.cachedContents) {
+          outCachedContents.push(...opt.cachedContents);
+        }
       } catch (e: any) {
         console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
         newText = cleanMsg.content;
@@ -291,7 +299,7 @@ function injectCCRTool(provider: string, body: any) {
       type: 'function',
       function: {
         name: 'tokenwall_retrieve_content',
-        description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+        description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
         parameters: {
           type: 'object',
           properties: {
@@ -308,7 +316,7 @@ function injectCCRTool(provider: string, body: any) {
     if (!body.tools) body.tools = [];
     body.tools.push({
       name: 'tokenwall_retrieve_content',
-      description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+      description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
       input_schema: {
         type: 'object',
         properties: {
@@ -329,7 +337,7 @@ function injectCCRTool(provider: string, body: any) {
     }
     toolObj.functionDeclarations.push({
       name: 'tokenwall_retrieve_content',
-      description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
+      description: 'Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.',
       parameters: {
         type: 'OBJECT',
         properties: {
@@ -351,6 +359,9 @@ function injectSystemInstructions(provider: string, body: any, config: any, cont
   }
   if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
     instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
+  }
+  if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
+    instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
   }
 
   if (instructions.length === 0) return;
@@ -1180,19 +1191,23 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools)
+        messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
       };
       
       // Optimize top-level Anthropic system prompt
       if (provider === 'anthropic' && finalRequestBody.system) {
         if (typeof finalRequestBody.system === 'string') {
-          finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText;
+          const opt = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools });
+          finalRequestBody.system = opt.optimizedText;
+          if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
         } else if (Array.isArray(finalRequestBody.system)) {
           finalRequestBody.system = finalRequestBody.system.map((block: any) => {
             if (block && block.type === 'text' && typeof block.text === 'string') {
+              const opt = promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+              if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
               return {
                 ...block,
-                text: promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
+                text: opt.optimizedText
               };
             }
             return block;
@@ -1202,16 +1217,18 @@ async function handleInterception(
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools)
+        contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
       };
       
       // Optimize top-level Gemini systemInstruction
       if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
         finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part: any) => {
           if (part && typeof part.text === 'string') {
+            const opt = promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+            if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
             return {
               ...part,
-              text: promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
+              text: opt.optimizedText
             };
           }
           return part;

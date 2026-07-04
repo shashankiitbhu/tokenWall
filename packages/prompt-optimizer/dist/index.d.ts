@@ -1,3 +1,4 @@
+import { CachedContent } from './code-compressor';
 import { ToolPruner } from './tool-pruner';
 export interface OptimizationResult {
     originalText: string;
@@ -7,6 +8,13 @@ export interface OptimizationResult {
 }
 export interface PromptOptimizerOptions {
     disableCodeCompression?: boolean;
+}
+export interface OptimizationResult {
+    originalText: string;
+    optimizedText: string;
+    tokensSaved: number;
+    savingsPercent: number;
+    cachedContents?: CachedContent[];
 }
 export declare class PromptOptimizer {
     optimize(prompt: string, model: string, options?: PromptOptimizerOptions): OptimizationResult;

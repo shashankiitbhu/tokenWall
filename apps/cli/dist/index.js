@@ -38930,15 +38930,19 @@ var require_code_compressor = __commonJS({
     var CodeCompressor = class {
       /**
        * Scans a prompt for JS/TS code blocks and `<file_content>` blocks,
-       * parses them into an AST using Tree-sitter, strips only actual comment nodes
-       * by byte-range slicing to preserve original whitespace, empty lines, and non-comment structure perfectly.
+       * parses them into an AST using Tree-sitter, strips only actual comment nodes,
+       * and skeletonizes large function bodies by masking them with a CCR token.
        */
-      static compress(prompt) {
+      static compress(prompt, disableCodeCompression = false) {
+        if (disableCodeCompression) {
+          return { optimizedText: prompt, cachedContents: [] };
+        }
+        const cachedContents = [];
         const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
         const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
           try {
-            const sparsified = this.sparsifyCode(code, lang);
+            const sparsified = this.sparsifyCode(code, lang, cachedContents);
             return `\`\`\`${lang}
 ${sparsified}
 \`\`\``;
@@ -38948,7 +38952,7 @@ ${sparsified}
         });
         optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
           try {
-            const sparsified = this.sparsifyCode(code, ext);
+            const sparsified = this.sparsifyCode(code, ext, cachedContents);
             return match.replace(code, `
 ${sparsified}
 `);
@@ -38956,12 +38960,12 @@ ${sparsified}
             return match;
           }
         });
-        return optimized;
+        return { optimizedText: optimized, cachedContents };
       }
       /**
-       * Parses the code with Tree-sitter and splices out comment nodes.
+       * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
        */
-      static sparsifyCode(code, langOrExt) {
+      static sparsifyCode(code, langOrExt, cachedContents) {
         const ext = langOrExt.toLowerCase();
         let parser;
         if (ext === "javascript" || ext === "js") {
@@ -38975,10 +38979,25 @@ ${sparsified}
         }
         try {
           const tree = parser.parse(code);
-          const commentNodes = [];
+          const removeNodes = [];
           const walk = (node) => {
             if (node.type === "comment") {
-              commentNodes.push(node);
+              removeNodes.push({ startIndex: node.startIndex, endIndex: node.endIndex });
+            } else if (node.type === "function_declaration" || node.type === "method_definition" || node.type === "arrow_function") {
+              const bodyNode = node.children.find((c) => c.type === "statement_block");
+              if (bodyNode) {
+                const lines = bodyNode.text.split("\n").length;
+                if (lines > 10) {
+                  const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
+                  cachedContents.push({ id, content: bodyNode.text });
+                  removeNodes.push({
+                    startIndex: bodyNode.startIndex,
+                    endIndex: bodyNode.endIndex,
+                    replaceWith: `{ /* [TokenWall Reversible Content: ${id}] */ }`
+                  });
+                  return;
+                }
+              }
             }
             for (let i = 0; i < node.childCount; i++) {
               const child = node.child(i);
@@ -38987,10 +39006,10 @@ ${sparsified}
             }
           };
           walk(tree.rootNode);
-          commentNodes.sort((a, b) => b.startIndex - a.startIndex);
+          removeNodes.sort((a, b) => b.startIndex - a.startIndex);
           let result = code;
-          for (const node of commentNodes) {
-            result = result.slice(0, node.startIndex) + result.slice(node.endIndex);
+          for (const node of removeNodes) {
+            result = result.slice(0, node.startIndex) + (node.replaceWith || "") + result.slice(node.endIndex);
           }
           return result.trim();
         } catch (e) {
@@ -39195,6 +39214,70 @@ var require_tools2 = __commonJS({
   }
 });
 
+// packages/prompt-optimizer/dist/tool-pruner.js
+var require_tool_pruner = __commonJS({
+  "packages/prompt-optimizer/dist/tool-pruner.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.ToolPruner = void 0;
+    var estimators_1 = require_dist7();
+    var tools_1 = require_tools2();
+    var ToolPruner = class {
+      /**
+       * Prunes obviously irrelevant tools from the request payload based on safe heuristics.
+       * Modifies the requestBody in-place and returns the number of tokens saved.
+       */
+      static pruneTools(provider, requestBody, model, conversationContext) {
+        let toolsArray = [];
+        if (provider === "openai" || provider === "anthropic") {
+          toolsArray = requestBody.tools || [];
+        } else if (provider === "gemini") {
+          toolsArray = requestBody.tools?.[0]?.functionDeclarations || [];
+        }
+        if (!toolsArray || toolsArray.length === 0) {
+          return 0;
+        }
+        const originalTokens = (0, estimators_1.countTokens)(JSON.stringify(toolsArray), model);
+        const contextLower = conversationContext.toLowerCase();
+        const needsBrowser = /web|browser|http|https|url|search|navigate|google/i.test(contextLower);
+        const needsBash = /run|execute|bash|shell|command|npm|yarn|build|test|start|script|make|gcc/i.test(contextLower);
+        const needsDb = /sql|database|postgres|mysql|query|db|table|row/i.test(contextLower);
+        const shouldPrune = (toolName) => {
+          const name = toolName.toLowerCase();
+          if (!needsBrowser && (name.includes("browser") || name.includes("puppeteer") || name.includes("web_search"))) {
+            return true;
+          }
+          if (!needsBash && (name.includes("execute_command") || name.includes("bash") || name.includes("run_script"))) {
+            return true;
+          }
+          if (!needsDb && (name.includes("sql") || name.includes("database") || name.includes("query_db"))) {
+            return true;
+          }
+          return false;
+        };
+        let prunedArray = toolsArray;
+        if (provider === "gemini") {
+          prunedArray = toolsArray.filter((t) => !shouldPrune(t.name));
+          prunedArray = tools_1.ToolSchemaOptimizer.optimize(prunedArray, false);
+          if (requestBody.tools && requestBody.tools.length > 0) {
+            requestBody.tools[0].functionDeclarations = prunedArray;
+          }
+        } else {
+          prunedArray = toolsArray.filter((t) => {
+            const name = provider === "openai" ? t.function?.name : t.name;
+            return !shouldPrune(name || "");
+          });
+          prunedArray = tools_1.ToolSchemaOptimizer.optimize(prunedArray, false);
+          requestBody.tools = prunedArray;
+        }
+        const prunedTokens = (0, estimators_1.countTokens)(JSON.stringify(prunedArray), model);
+        return Math.max(0, originalTokens - prunedTokens);
+      }
+    };
+    exports2.ToolPruner = ToolPruner;
+  }
+});
+
 // packages/prompt-optimizer/dist/index.js
 var require_dist11 = __commonJS({
   "packages/prompt-optimizer/dist/index.js"(exports2) {
@@ -39216,9 +39299,13 @@ var require_dist11 = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.PromptOptimizer = void 0;
+    exports2.ToolPruner = exports2.PromptOptimizer = void 0;
     var estimators_1 = require_dist7();
     var code_compressor_1 = require_code_compressor();
+    var tool_pruner_1 = require_tool_pruner();
+    Object.defineProperty(exports2, "ToolPruner", { enumerable: true, get: function() {
+      return tool_pruner_1.ToolPruner;
+    } });
     var CONVERSATIONAL_FILLERS = [
       // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
       { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: "" },
@@ -39263,17 +39350,20 @@ var require_dist11 = __commonJS({
       { pattern: /kindly help me with/gi, replacement: "resolve" }
     ];
     function minifyJsonBlocks(text) {
-      return text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
+      const cachedContents = [];
+      const minified = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
         try {
           const parsed = JSON.parse(jsonString);
           const walk = (obj) => {
             if (Array.isArray(obj)) {
               if (obj.length > 50) {
+                const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
                 return [
                   walk(obj[0]),
                   walk(obj[1]),
                   walk(obj[2]),
-                  `... [TokenWall: ${obj.length - 3} more items truncated]`
+                  `... [TokenWall Reversible Content: ${id} - ${obj.length - 3} more items truncated. Use tokenwall_retrieve_content tool with content_id='${id}']`
                 ];
               }
               return obj.map(walk);
@@ -39283,6 +39373,19 @@ var require_dist11 = __commonJS({
                 newObj[key] = walk(obj[key]);
               }
               return newObj;
+            } else if (typeof obj === "string") {
+              if (obj.length > 200) {
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(obj);
+                const isJWT = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(obj);
+                const isHex = /^[0-9a-fA-F]{32,}$/.test(obj);
+                const isBase64 = /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/.test(obj) && !obj.includes(" ");
+                if (isUUID || isJWT || isHex || isBase64) {
+                  return obj;
+                }
+                const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                cachedContents.push({ id, content: obj });
+                return obj.substring(0, 100) + `... [TokenWall Reversible Content: ${id} - string truncated, original length ${obj.length}. Use tokenwall_retrieve_content tool with content_id='${id}'] ...` + obj.substring(obj.length - 100);
+              }
             }
             return obj;
           };
@@ -39293,6 +39396,7 @@ ${JSON.stringify(walk(parsed), null, 2)}
           return match;
         }
       });
+      return { text: minified, cachedContents };
     }
     function deduplicateContext(text) {
       const blocks = text.split("\n\n");
@@ -39315,10 +39419,13 @@ ${JSON.stringify(walk(parsed), null, 2)}
     var PromptOptimizer = class {
       optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
-        let optimized = minifyJsonBlocks(prompt);
-        if (!options?.disableCodeCompression) {
-          optimized = code_compressor_1.CodeCompressor.compress(optimized);
-        }
+        let allCachedContents = [];
+        const jsonResult = minifyJsonBlocks(prompt);
+        let optimized = jsonResult.text;
+        allCachedContents.push(...jsonResult.cachedContents);
+        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression);
+        optimized = codeResult.optimizedText;
+        allCachedContents.push(...codeResult.cachedContents);
         optimized = deduplicateContext(optimized);
         for (const item of CONVERSATIONAL_FILLERS) {
           optimized = optimized.replace(item.pattern, item.replacement);
@@ -39331,7 +39438,8 @@ ${JSON.stringify(walk(parsed), null, 2)}
           originalText: prompt,
           optimizedText: optimized,
           tokensSaved,
-          savingsPercent
+          savingsPercent,
+          cachedContents: allCachedContents
         };
       }
     };
@@ -49721,7 +49829,7 @@ var require_dist16 = __commonJS({
       const targetUrl = `${baseUrl}${modelUrl}`;
       return handleInterception("gemini", targetUrl, request, reply);
     });
-    function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression) {
+    function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression, outCachedContents = []) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -49735,6 +49843,9 @@ var require_dist16 = __commonJS({
           if (cleanMsg.role === "user" || cleanMsg.role === "system") {
             const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
             newText = opt.optimizedText;
+            if (opt.cachedContents) {
+              outCachedContents.push(...opt.cachedContents);
+            }
           } else if (cleanMsg.role === "tool") {
             newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
           }
@@ -49790,7 +49901,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression) {
+    function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression, outCachedContents = []) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -49804,6 +49915,9 @@ var require_dist16 = __commonJS({
           try {
             const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
             newText = opt.optimizedText;
+            if (opt.cachedContents) {
+              outCachedContents.push(...opt.cachedContents);
+            }
           } catch (e) {
             console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
             newText = cleanMsg.content;
@@ -49836,7 +49950,7 @@ var require_dist16 = __commonJS({
           type: "function",
           function: {
             name: "tokenwall_retrieve_content",
-            description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
+            description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
             parameters: {
               type: "object",
               properties: {
@@ -49854,7 +49968,7 @@ var require_dist16 = __commonJS({
           body.tools = [];
         body.tools.push({
           name: "tokenwall_retrieve_content",
-          description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
+          description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
           input_schema: {
             type: "object",
             properties: {
@@ -49876,7 +49990,7 @@ var require_dist16 = __commonJS({
         }
         toolObj.functionDeclarations.push({
           name: "tokenwall_retrieve_content",
-          description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
+          description: "Retrieves the original, untruncated content of a block that was compressed by TokenWall (e.g. skeletonized functions, lockfiles, large logs, or base64 data). Call this if you need to read the full content to answer the query.",
           parameters: {
             type: "OBJECT",
             properties: {
@@ -49897,6 +50011,9 @@ var require_dist16 = __commonJS({
       }
       if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
         instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
+      }
+      if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
+        instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
       }
       if (instructions.length === 0)
         return;
@@ -50361,10 +50478,17 @@ ${steeringMsg}`;
       let categorySavings = {};
       try {
         attribution = estimators_1.TokenAttributionAnalyzer.analyze(parsedRequest);
+        const contextStr = parsedRequest.messages.map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\\n");
+        let toolPruningSavings = 0;
+        try {
+          toolPruningSavings = prompt_optimizer_1.ToolPruner.pruneTools(provider, request.body, parsedRequest.model, contextStr);
+        } catch (e) {
+          console.error("[TokenWall Gateway] ToolPruner failed:", e.message);
+        }
         categorySavings = {
           "JSON crushing": 0,
           "Log pruning": 0,
-          "Tool pruning": 0,
+          "Tool pruning": toolPruningSavings,
           "Context deduplication": 0,
           "Code compression": 0
         };
@@ -50425,7 +50549,7 @@ ${runningTotal.toLocaleString()}`);
           { name: "Source code", count: Math.max(0, attribution.sourceCodeTokens - categorySavings["Code compression"]), reason: hasEditTools ? "Write-path safety bypass" : null },
           { name: "Logs", count: Math.max(0, attribution.logsTokens - categorySavings["Log pruning"]), reason: null },
           { name: "JSON payloads", count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings["JSON crushing"]), reason: null },
-          { name: "Tool schemas", count: Math.max(0, attribution.toolSchemasTokens - categorySavings["Tool pruning"]), reason: "Tool pruning currently inactive" },
+          { name: "Tool schemas", count: Math.max(0, attribution.toolSchemasTokens - categorySavings["Tool pruning"]), reason: categorySavings["Tool pruning"] > 0 ? null : "Safe heuristics preserved all tools" },
           { name: "Conversation", count: Math.max(0, attribution.conversationTokens), reason: "Agent intent preservation" }
         ].sort((a, b) => b.count - a.count);
         const topOpportunity = remain[0];
@@ -50594,17 +50718,23 @@ ${runningTotal.toLocaleString()}`);
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools)
+            messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
-              finalRequestBody.system = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText;
+              const opt = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools });
+              finalRequestBody.system = opt.optimizedText;
+              if (opt.cachedContents)
+                contextReport.cachedContents.push(...opt.cachedContents);
             } else if (Array.isArray(finalRequestBody.system)) {
               finalRequestBody.system = finalRequestBody.system.map((block) => {
                 if (block && block.type === "text" && typeof block.text === "string") {
+                  const opt = promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+                  if (opt.cachedContents)
+                    contextReport.cachedContents.push(...opt.cachedContents);
                   return {
                     ...block,
-                    text: promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
+                    text: opt.optimizedText
                   };
                 }
                 return block;
@@ -50614,14 +50744,17 @@ ${runningTotal.toLocaleString()}`);
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools)
+            contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
           };
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
             finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part) => {
               if (part && typeof part.text === "string") {
+                const opt = promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+                if (opt.cachedContents)
+                  contextReport.cachedContents.push(...opt.cachedContents);
                 return {
                   ...part,
-                  text: promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools }).optimizedText
+                  text: opt.optimizedText
                 };
               }
               return part;
@@ -50630,17 +50763,7 @@ ${runningTotal.toLocaleString()}`);
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
         finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-        if (finalRequestBody.tools && Array.isArray(finalRequestBody.tools) && finalRequestBody.tools.length > 0) {
-          try {
-            finalRequestBody.tools = prompt_optimizer_1.ToolRouter.route(finalRequestBody.tools, finalRequest.messages);
-            finalRequestBody.tools = prompt_optimizer_1.ToolSchemaOptimizer.optimize(finalRequestBody.tools, false);
-            finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-          } catch (err) {
-            console.error("[TokenWall Gateway] Tool optimization failed, falling open:", err.message);
-            finalRequestBody.tools = request.body.tools;
-            finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
-          }
-        }
+        finalRequest = providers_1.ProviderRegistry.parseRequest(provider, finalRequestBody, targetUrl);
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`\u2714 Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
