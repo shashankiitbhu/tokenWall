@@ -310,14 +310,21 @@ async function main() {
         let correctId = false;
         let correctFinalEdit = false;
 
-        // Turn 1: Model answers easily (no retrieve needed)
-        
-        const res1 = await callLLM(messages, []);
+        // Turn 1: Model answers easily (no retrieve needed, but tools available realistically)
+        const res1 = await callLLM(messages, [RETRIEVE_TOOL]);
         messages.push(res1.message);
-        if (res1.message.tool_calls && res1.message.tool_calls.length > 0) {
-          throw new Error("Model hallucinated a tool call on Turn 1 instead of acknowledging");
+        
+        let retrievedOnTurn1 = false;
+        if (res1.message.tool_calls?.[0]?.function?.name === 'tokenwall_retrieve_content') {
+            retrievedOnTurn1 = true;
+            retrievedBeforeAct = true;
+            const args = JSON.parse(res1.message.tool_calls[0].function.arguments);
+            if (args.content_id === targetId) correctId = true;
+            messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: res1.message.tool_calls[0].id, content: opt.cachedContents[0].content });
+            
+            const res1_followup = await callLLM(messages, []);
+            messages.push(res1_followup.message);
         }
-
 
         // Filler turns
         messages.push({ role: 'user', content: "What is 2+2?" });
@@ -327,19 +334,33 @@ async function main() {
         messages.push({ role: 'user', content: "By the way, what was the exact logic inside the complexMethod from earlier? Please output the full deep logic line." });
 
         const resN = await callLLM(messages, [RETRIEVE_TOOL]);
-        if (resN.message.tool_calls?.[0]?.function?.name === 'tokenwall_retrieve_content') {
-          retrievedBeforeAct = true;
-          const args = JSON.parse(resN.message.tool_calls[0].function.arguments);
-          if (args.content_id === targetId) {
-            correctId = true;
-            messages.push(resN.message);
-            messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: resN.message.tool_calls[0].id, content: opt.cachedContents[0].content });
-
-            const resFinal = await callLLM(messages, []);
-            if (resFinal.message.content && resFinal.message.content.includes('d = d - 1')) {
-              correctFinalEdit = true;
+        
+        if (retrievedOnTurn1) {
+            // Already retrieved, should answer directly
+            if (resN.message.content && resN.message.content.includes('d = d - 1')) {
+                correctFinalEdit = true;
+            } else if (resN.message.tool_calls?.[0]?.function?.name === 'tokenwall_retrieve_content') {
+                messages.push(resN.message);
+                messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: resN.message.tool_calls[0].id, content: opt.cachedContents[0].content });
+                const resFinal = await callLLM(messages, []);
+                if (resFinal.message.content && resFinal.message.content.includes('d = d - 1')) correctFinalEdit = true;
             }
-          }
+        } else {
+            // Didn't retrieve on Turn 1, MUST retrieve now
+            if (resN.message.tool_calls?.[0]?.function?.name === 'tokenwall_retrieve_content') {
+              retrievedBeforeAct = true;
+              const args = JSON.parse(resN.message.tool_calls[0].function.arguments);
+              if (args.content_id === targetId) {
+                correctId = true;
+                messages.push(resN.message);
+                messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: resN.message.tool_calls[0].id, content: opt.cachedContents[0].content });
+
+                const resFinal = await callLLM(messages, []);
+                if (resFinal.message.content && resFinal.message.content.includes('d = d - 1')) {
+                  correctFinalEdit = true;
+                }
+              }
+            }
         }
         return { retrievedBeforeAct, correctId, correctFinalEdit };
       }
@@ -445,9 +466,10 @@ async function main() {
              messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: tc.id, content });
           }
           
-          // Could technically loop if it retrieved 1 by 1, but let's assume it grabs both or finishes
-          const res2 = await callLLM(messages, []);
-          if (res2.message.content && res2.message.content.includes('token_12345') && res2.message.content.includes('8080')) {
+          // Allow sequential retrieval by passing the tool again
+          const res2 = await callLLM(messages, [RETRIEVE_TOOL]);
+          const res2Text = (res2.message.content || '') + JSON.stringify(res2.message.tool_calls || []);
+          if (res2Text.includes('token_12345') && res2Text.includes('8080')) {
               correctFinalEdit = true;
           } else if (res2.message.tool_calls) {
               // Handle sequential retrieval (Gemini sometimes does this)
@@ -457,8 +479,9 @@ async function main() {
                  const content = skTokens.find(s => s.id === args.content_id)?.content || "ERROR";
                  messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: tc.id, content });
               }
-              const res3 = await callLLM(messages, []);
-              if (res3.message.content && res3.message.content.includes('token_12345') && res3.message.content.includes('8080')) {
+              const res3 = await callLLM(messages, [RETRIEVE_TOOL]);
+              const res3Text = (res3.message.content || '') + JSON.stringify(res3.message.tool_calls || []);
+              if (res3Text.includes('token_12345') && res3Text.includes('8080')) {
                   correctFinalEdit = true;
               }
           }

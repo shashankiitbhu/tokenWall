@@ -38317,14 +38317,7 @@ var require_dist9 = __commonJS({
         const MAX_DIFF_HOPS = 3;
         let deduplicationsApplied = 0;
         const queryKeywords = query_analyzer_1.QueryAnalyzer.extractFromMessages(cleanMessages);
-        const hasEditTools = req.toolsSchemaText && (req.toolsSchemaText.includes("replace_file_content") || req.toolsSchemaText.includes("insert_at_line") || req.toolsSchemaText.includes("edit_file") || req.toolsSchemaText.includes("write_to_file") || req.toolsSchemaText.includes("apply_diff"));
         const effectiveConfig = config ? { ...config } : {};
-        if (hasEditTools) {
-          effectiveConfig.codeCompression = false;
-          if (!effectiveConfig.importance)
-            effectiveConfig.importance = {};
-          effectiveConfig.importance.policy = "conservative";
-        }
         const isReversible = effectiveConfig.reversibleCompression !== false;
         for (let i = 0; i < cleanMessages.length; i++) {
           const msg = cleanMessages[i];
@@ -38950,14 +38943,18 @@ var require_code_compressor = __commonJS({
             else
               metrics.code.fallbackOptOutUserConfig += totalDetected;
           }
-          return { optimizedText: prompt, cachedContents: [] };
+          return { optimizedText: prompt, cachedContents: [], compressionMap: [] };
         }
         const cachedContents = [];
+        const compressionMap = [];
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
           try {
             const sparsified = this.sparsifyCode(code, lang, cachedContents);
             if (metrics)
               metrics.code.successfullyOptimized++;
+            if (sparsified !== code) {
+              compressionMap.push({ original: code, compressed: sparsified });
+            }
             return `\`\`\`${lang}
 ${sparsified}
 \`\`\``;
@@ -38974,6 +38971,9 @@ ${sparsified}
             const sparsified = this.sparsifyCode(code, ext, cachedContents);
             if (metrics)
               metrics.code.successfullyOptimized++;
+            if (sparsified !== code) {
+              compressionMap.push({ original: code, compressed: sparsified });
+            }
             return match.replace(code, `
 ${sparsified}
 `);
@@ -38985,7 +38985,7 @@ ${sparsified}
             return match;
           }
         });
-        return { optimizedText: optimized, cachedContents };
+        return { optimizedText: optimized, cachedContents, compressionMap };
       }
       /**
        * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
@@ -39007,7 +39007,8 @@ ${sparsified}
           const removeNodes = [];
           const walk = (node) => {
             if (node.type === "comment") {
-              removeNodes.push({ startIndex: node.startIndex, endIndex: node.endIndex });
+              const newlines = (node.text.match(/\n/g) || []).length;
+              removeNodes.push({ startIndex: node.startIndex, endIndex: node.endIndex, replaceWith: "\n".repeat(newlines) });
             } else if (node.type === "function_declaration" || node.type === "method_definition" || node.type === "arrow_function") {
               const bodyNode = node.children.find((c) => c.type === "statement_block");
               if (bodyNode) {
@@ -39015,10 +39016,11 @@ ${sparsified}
                 if (lines > 10) {
                   const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
                   cachedContents.push({ id, content: bodyNode.text });
+                  const newlinesToPad = Math.max(0, lines - 1);
                   removeNodes.push({
                     startIndex: bodyNode.startIndex,
                     endIndex: bodyNode.endIndex,
-                    replaceWith: `{ /* [TokenWall Reversible Content: ${id}] */ }`
+                    replaceWith: `{ /* [TokenWall Reversible Content: ${id}] */ }` + "\n".repeat(newlinesToPad)
                   });
                   return;
                 }
@@ -39303,6 +39305,31 @@ var require_tool_pruner = __commonJS({
   }
 });
 
+// packages/prompt-optimizer/dist/verbosity-steering.js
+var require_verbosity_steering = __commonJS({
+  "packages/prompt-optimizer/dist/verbosity-steering.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.VerbositySteering = void 0;
+    var VerbositySteering = class {
+      static getSteeringInstructions(config, contextReport) {
+        const instructions = [];
+        if (config?.verbositySteering !== false) {
+          instructions.push("Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.");
+        }
+        if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
+          instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
+        }
+        if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
+          instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
+        }
+        return instructions;
+      }
+    };
+    exports2.VerbositySteering = VerbositySteering;
+  }
+});
+
 // packages/prompt-optimizer/dist/index.js
 var require_dist11 = __commonJS({
   "packages/prompt-optimizer/dist/index.js"(exports2) {
@@ -39474,6 +39501,7 @@ ${JSON.stringify(walk(parsed), null, 2)}
       async optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
+        let compressionMap = [];
         const coverage = {
           json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
           code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
@@ -39501,6 +39529,9 @@ ${JSON.stringify(walk(parsed), null, 2)}
         const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
         optimized = codeResult.optimizedText;
         allCachedContents.push(...codeResult.cachedContents);
+        if (codeResult.compressionMap) {
+          compressionMap.push(...codeResult.compressionMap);
+        }
         if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
           coverage.sampledFailures.push({ type: "magika_mismatch", reason: "Magika detected code, but regex found no fence", snippet: prompt.substring(0, 200) });
         }
@@ -39521,12 +39552,14 @@ ${JSON.stringify(walk(parsed), null, 2)}
           tokensSaved,
           savingsPercent,
           cachedContents: allCachedContents,
-          coverage
+          coverage,
+          compressionMap
         };
       }
     };
     exports2.PromptOptimizer = PromptOptimizer;
     __exportStar(require_tools2(), exports2);
+    __exportStar(require_verbosity_steering(), exports2);
   }
 });
 
@@ -49911,6 +49944,26 @@ var require_dist16 = __commonJS({
       const targetUrl = `${baseUrl}${modelUrl}`;
       return handleInterception("gemini", targetUrl, request, reply);
     });
+    function applyReverseMapping(targetContent, replacementContent, compressionMap) {
+      if (!compressionMap || compressionMap.length === 0)
+        return { target: targetContent, replacement: replacementContent };
+      for (const entry of compressionMap) {
+        const { original, compressed } = entry;
+        const idx = compressed.indexOf(targetContent);
+        if (idx !== -1) {
+          const prefix = compressed.substring(0, idx);
+          const startLine = prefix.split("\n").length - 1;
+          const endLine = startLine + targetContent.split("\n").length - 1;
+          const originalLines = original.split("\n");
+          const compressedLines = compressed.split("\n");
+          const expandedTarget = originalLines.slice(startLine, endLine + 1).join("\n");
+          const fullCompressedTarget = compressedLines.slice(startLine, endLine + 1).join("\n");
+          const expandedReplacement = fullCompressedTarget.replace(targetContent, replacementContent);
+          return { target: expandedTarget, replacement: expandedReplacement };
+        }
+      }
+      return { target: targetContent, replacement: replacementContent };
+    }
     function aggregateCoverage(target, source) {
       if (!source)
         return;
@@ -49936,7 +49989,7 @@ var require_dist16 = __commonJS({
         }
       }
     }
-    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
+    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -49955,6 +50008,9 @@ var require_dist16 = __commonJS({
             }
             if (opt.coverage && outCoverageMetrics) {
               aggregateCoverage(outCoverageMetrics, opt.coverage);
+            }
+            if (opt.compressionMap) {
+              outCompressionMap.push(...opt.compressionMap);
             }
           } else if (cleanMsg.role === "tool") {
             newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
@@ -50011,7 +50067,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
+    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -50030,6 +50086,9 @@ var require_dist16 = __commonJS({
             }
             if (opt.coverage && outCoverageMetrics) {
               aggregateCoverage(outCoverageMetrics, opt.coverage);
+            }
+            if (opt.compressionMap) {
+              outCompressionMap.push(...opt.compressionMap);
             }
           } catch (e) {
             console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
@@ -50118,16 +50177,7 @@ var require_dist16 = __commonJS({
       }
     }
     function injectSystemInstructions(provider, body, config, contextReport) {
-      let instructions = [];
-      if (config.verbositySteering !== false) {
-        instructions.push("Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.");
-      }
-      if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
-        instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
-      }
-      if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
-        instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
-      }
+      const instructions = prompt_optimizer_1.VerbositySteering.getSteeringInstructions(config, contextReport);
       if (instructions.length === 0)
         return;
       const steeringMsg = instructions.join("\n\n");
@@ -50209,7 +50259,7 @@ ${steeringMsg}`;
         }
       }
     }
-    async function executeUpstreamRequest(provider, targetUrl, headers, requestBody) {
+    async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
       const response = await fetch(targetUrl, {
         method: "POST",
         headers,
@@ -50283,11 +50333,84 @@ ${steeringMsg}`;
             }]
           });
         }
-        return executeUpstreamRequest(provider, targetUrl, headers, requestBody);
+        return executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap);
+      }
+      if (globalCompressionMap.length > 0) {
+        if (provider === "openai") {
+          if (resBody.choices?.[0]?.message?.tool_calls) {
+            for (const tc of resBody.choices[0].message.tool_calls) {
+              if (tc.function?.name === "replace_file_content" || tc.function?.name === "edit_file" || tc.function?.name === "multi_replace_file_content") {
+                try {
+                  const args2 = JSON.parse(tc.function.arguments);
+                  if (args2.TargetContent && args2.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                    args2.TargetContent = target;
+                    args2.ReplacementContent = replacement;
+                  } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
+                    for (const chunk of args2.ReplacementChunks) {
+                      if (chunk.TargetContent && chunk.ReplacementContent) {
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        chunk.TargetContent = target;
+                        chunk.ReplacementContent = replacement;
+                      }
+                    }
+                  }
+                  tc.function.arguments = JSON.stringify(args2);
+                } catch {
+                }
+              }
+            }
+          }
+        } else if (provider === "anthropic") {
+          if (resBody.content) {
+            for (const block of resBody.content) {
+              if (block.type === "tool_use" && (block.name === "replace_file_content" || block.name === "edit_file" || block.name === "multi_replace_file_content")) {
+                if (block.input) {
+                  if (block.input.TargetContent && block.input.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap);
+                    block.input.TargetContent = target;
+                    block.input.ReplacementContent = replacement;
+                  } else if (block.input.ReplacementChunks && Array.isArray(block.input.ReplacementChunks)) {
+                    for (const chunk of block.input.ReplacementChunks) {
+                      if (chunk.TargetContent && chunk.ReplacementContent) {
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        chunk.TargetContent = target;
+                        chunk.ReplacementContent = replacement;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else if (provider === "gemini") {
+          if (resBody.candidates?.[0]?.content?.parts) {
+            for (const part of resBody.candidates[0].content.parts) {
+              if (part.functionCall && (part.functionCall.name === "replace_file_content" || part.functionCall.name === "edit_file" || part.functionCall.name === "multi_replace_file_content")) {
+                const args2 = part.functionCall.args;
+                if (args2) {
+                  if (args2.TargetContent && args2.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                    args2.TargetContent = target;
+                    args2.ReplacementContent = replacement;
+                  } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
+                    for (const chunk of args2.ReplacementChunks) {
+                      if (chunk.TargetContent && chunk.ReplacementContent) {
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        chunk.TargetContent = target;
+                        chunk.ReplacementContent = replacement;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
       return { response, resBody };
     }
-    async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens) {
+    async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = []) {
       let inputAccumulated = 0;
       let outputAccumulated = 0;
       let streamFailed = false;
@@ -50504,8 +50627,165 @@ ${steeringMsg}`;
               }
               return runTurn(body);
             } else {
-              for (const chunk of bufferChunks) {
-                controller.enqueue(chunk);
+              let needsReverseMapping = false;
+              if (globalCompressionMap.length > 0) {
+                if (provider === "openai" && assistantToolCallsAccumulated.some((tc) => tc.function.name === "replace_file_content" || tc.function.name === "edit_file" || tc.function.name === "multi_replace_file_content"))
+                  needsReverseMapping = true;
+                if (provider === "anthropic" && anthropicContentBlocks.some((b) => b.type === "tool_use" && (b.name === "replace_file_content" || b.name === "edit_file" || b.name === "multi_replace_file_content")))
+                  needsReverseMapping = true;
+                if (provider === "gemini" && fullAssistantResponseForTurn?.parts?.some((p) => p.functionCall && (p.functionCall.name === "replace_file_content" || p.functionCall.name === "edit_file" || p.functionCall.name === "multi_replace_file_content")))
+                  needsReverseMapping = true;
+              }
+              if (needsReverseMapping) {
+                console.log(`[Stream CCR] Reverse mapping edit tool for request ${requestId}`);
+                const encoder = new TextEncoder();
+                if (provider === "openai") {
+                  for (const tc of assistantToolCallsAccumulated) {
+                    if (tc.function.name === "replace_file_content" || tc.function.name === "edit_file" || tc.function.name === "multi_replace_file_content") {
+                      try {
+                        const args2 = JSON.parse(tc.function.arguments);
+                        if (args2.TargetContent && args2.ReplacementContent) {
+                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                          args2.TargetContent = target;
+                          args2.ReplacementContent = replacement;
+                        } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
+                          for (const chunk of args2.ReplacementChunks) {
+                            if (chunk.TargetContent && chunk.ReplacementContent) {
+                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                              chunk.TargetContent = target;
+                              chunk.ReplacementContent = replacement;
+                            }
+                          }
+                        }
+                        tc.function.arguments = JSON.stringify(args2);
+                      } catch {
+                      }
+                    }
+                  }
+                  const chunkObj = {
+                    id: `chatcmpl-${requestId}`,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1e3),
+                    model: finalModel,
+                    choices: [{
+                      index: 0,
+                      delta: {
+                        role: "assistant",
+                        content: assistantTextAccumulated || null,
+                        tool_calls: assistantToolCallsAccumulated.map((tc) => ({
+                          index: tc.index,
+                          id: tc.id,
+                          type: "function",
+                          function: tc.function
+                        }))
+                      },
+                      finish_reason: "tool_calls"
+                    }]
+                  };
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunkObj)}
+
+`));
+                  controller.enqueue(encoder.encode(`data: [DONE]
+
+`));
+                } else if (provider === "anthropic") {
+                  for (const b of anthropicContentBlocks) {
+                    if (b.type === "tool_use" && (b.name === "replace_file_content" || b.name === "edit_file" || b.name === "multi_replace_file_content")) {
+                      try {
+                        let args2 = typeof b.input === "string" ? JSON.parse(b.input) : b.input;
+                        if (args2.TargetContent && args2.ReplacementContent) {
+                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                          args2.TargetContent = target;
+                          args2.ReplacementContent = replacement;
+                        } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
+                          for (const chunk of args2.ReplacementChunks) {
+                            if (chunk.TargetContent && chunk.ReplacementContent) {
+                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                              chunk.TargetContent = target;
+                              chunk.ReplacementContent = replacement;
+                            }
+                          }
+                        }
+                        b.input = args2;
+                      } catch {
+                      }
+                    }
+                  }
+                  controller.enqueue(encoder.encode(`event: message_start
+data: ${JSON.stringify({ type: "message_start", message: { id: `msg_${requestId}`, type: "message", role: "assistant", content: [], model: finalModel, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}
+
+`));
+                  for (let i = 0; i < anthropicContentBlocks.length; i++) {
+                    const b = anthropicContentBlocks[i];
+                    if (b.type === "text") {
+                      controller.enqueue(encoder.encode(`event: content_block_start
+data: ${JSON.stringify({ type: "content_block_start", index: i, content_block: { type: "text", text: "" } })}
+
+`));
+                      controller.enqueue(encoder.encode(`event: content_block_delta
+data: ${JSON.stringify({ type: "content_block_delta", index: i, delta: { type: "text_delta", text: b.text } })}
+
+`));
+                      controller.enqueue(encoder.encode(`event: content_block_stop
+data: ${JSON.stringify({ type: "content_block_stop", index: i })}
+
+`));
+                    } else if (b.type === "tool_use") {
+                      controller.enqueue(encoder.encode(`event: content_block_start
+data: ${JSON.stringify({ type: "content_block_start", index: i, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } })}
+
+`));
+                      controller.enqueue(encoder.encode(`event: content_block_delta
+data: ${JSON.stringify({ type: "content_block_delta", index: i, delta: { type: "input_json_delta", partial_json: JSON.stringify(b.input) } })}
+
+`));
+                      controller.enqueue(encoder.encode(`event: content_block_stop
+data: ${JSON.stringify({ type: "content_block_stop", index: i })}
+
+`));
+                    }
+                  }
+                  controller.enqueue(encoder.encode(`event: message_delta
+data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 0 } })}
+
+`));
+                  controller.enqueue(encoder.encode(`event: message_stop
+data: ${JSON.stringify({ type: "message_stop" })}
+
+`));
+                } else if (provider === "gemini") {
+                  if (fullAssistantResponseForTurn?.parts) {
+                    for (const p of fullAssistantResponseForTurn.parts) {
+                      if (p.functionCall && (p.functionCall.name === "replace_file_content" || p.functionCall.name === "edit_file" || p.functionCall.name === "multi_replace_file_content")) {
+                        try {
+                          let args2 = typeof p.functionCall.args === "string" ? JSON.parse(p.functionCall.args) : p.functionCall.args;
+                          if (args2.TargetContent && args2.ReplacementContent) {
+                            const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                            args2.TargetContent = target;
+                            args2.ReplacementContent = replacement;
+                          } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
+                            for (const chunk of args2.ReplacementChunks) {
+                              if (chunk.TargetContent && chunk.ReplacementContent) {
+                                const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                chunk.TargetContent = target;
+                                chunk.ReplacementContent = replacement;
+                              }
+                            }
+                          }
+                          p.functionCall.args = args2;
+                        } catch {
+                        }
+                      }
+                    }
+                  }
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: fullAssistantResponseForTurn }] })}
+
+`));
+                }
+              } else {
+                for (const chunk of bufferChunks) {
+                  controller.enqueue(chunk);
+                }
               }
             }
           }
@@ -50590,7 +50870,6 @@ ${steeringMsg}`;
           telemetryLogger.emitEvent({ eventType: "pipeline_error", sessionId, requestId, metadata: { stage: "ModelRouter", error: err.message } });
         }
       }
-      const hasEditTools = request.body.tools && request.body.tools.some((t) => ["replace_file_content", "insert_at_line", "edit_file", "write_to_file", "apply_diff"].includes(t?.function?.name));
       let attribution = null;
       let categorySavings = {};
       try {
@@ -50663,7 +50942,7 @@ ${runningTotal.toLocaleString()}
 ${runningTotal.toLocaleString()}`);
         console.log("\nLargest remaining opportunity:");
         const remain = [
-          { name: "Source code", count: Math.max(0, attribution.sourceCodeTokens - categorySavings["Code compression"]), reason: hasEditTools ? "Write-path safety bypass" : null },
+          { name: "Source code", count: Math.max(0, attribution.sourceCodeTokens - categorySavings["Code compression"]), reason: null },
           { name: "Logs", count: Math.max(0, attribution.logsTokens - categorySavings["Log pruning"]), reason: null },
           { name: "JSON payloads", count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings["JSON crushing"]), reason: null },
           { name: "Tool schemas", count: Math.max(0, attribution.toolSchemasTokens - categorySavings["Tool pruning"]), reason: categorySavings["Tool pruning"] > 0 ? null : "Safe heuristics preserved all tools" },
@@ -50687,7 +50966,7 @@ ${runningTotal.toLocaleString()}`);
       let optimization = void 0;
       if (!isKillSwitchActive) {
         try {
-          optimization = lastUserMsg ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null }) : void 0;
+          optimization = lastUserMsg ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null }) : void 0;
         } catch (err) {
           console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
         }
@@ -50829,17 +51108,18 @@ ${runningTotal.toLocaleString()}`);
       let finalRequestBody = request.body;
       let finalRequest = parsedRequest;
       let savedTokens = 0;
+      const globalCompressionMap = [];
       if (action === "optimize") {
         const cleanMsgs = contextReport.cleanMessages;
         const lastUserIdx = cleanMsgs.map((m) => m.role).lastIndexOf("user");
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
-              const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+              const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
               finalRequestBody.system = opt.optimizedText;
               if (opt.cachedContents)
                 contextReport.cachedContents.push(...opt.cachedContents);
@@ -50849,11 +51129,13 @@ ${runningTotal.toLocaleString()}`);
               for (let i = 0; i < finalRequestBody.system.length; i++) {
                 const block = finalRequestBody.system[i];
                 if (block && block.type === "text" && typeof block.text === "string") {
-                  const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+                  const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
                   if (opt.cachedContents)
                     contextReport.cachedContents.push(...opt.cachedContents);
                   if (opt.coverage)
                     aggregateCoverage(contextReport.coverage, opt.coverage);
+                  if (opt.compressionMap)
+                    globalCompressionMap.push(...opt.compressionMap);
                   finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
                 }
               }
@@ -50862,17 +51144,19 @@ ${runningTotal.toLocaleString()}`);
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
           };
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
             for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
               const part = finalRequestBody.systemInstruction.parts[i];
               if (part && typeof part.text === "string") {
-                const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+                const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
                 if (opt.cachedContents)
                   contextReport.cachedContents.push(...opt.cachedContents);
                 if (opt.coverage)
                   aggregateCoverage(contextReport.coverage, opt.coverage);
+                if (opt.compressionMap)
+                  globalCompressionMap.push(...opt.compressionMap);
                 finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
               }
             }
@@ -50986,7 +51270,7 @@ ${runningTotal.toLocaleString()}`);
       telemetryLogger.emitEvent({ eventType: "provider_request_sent", sessionId, requestId, provider, model: finalRequest.model });
       try {
         if (!parsedRequest.stream) {
-          const { response: upstreamRes, resBody } = await executeUpstreamRequest(provider, targetUrl, forwardHeaders, finalRequestBody);
+          const { response: upstreamRes, resBody } = await executeUpstreamRequest(provider, targetUrl, forwardHeaders, finalRequestBody, globalCompressionMap);
           if (!upstreamRes.ok) {
             const errorText = await upstreamRes.text();
             telemetryLogger.emitEvent({ eventType: "request_stream_failed", sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
@@ -51011,7 +51295,7 @@ ${runningTotal.toLocaleString()}`);
         reply.header("content-type", "text/event-stream");
         reply.header("cache-control", "no-cache");
         reply.header("connection", "keep-alive");
-        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens);
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap);
         return reply.send(stream);
       } catch (error) {
         const isUpstreamError = error?.message && error.message.includes("Upstream error:");

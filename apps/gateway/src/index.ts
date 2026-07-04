@@ -7,7 +7,7 @@ import { calculatePreFlightEstimation, getPricingForModel, countTokens, TokenAtt
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
 import { ContextAnalyzer } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
-import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter, ToolPruner } from '@tokenwall/prompt-optimizer';
+import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter, ToolPruner, VerbositySteering } from '@tokenwall/prompt-optimizer';
 import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
@@ -162,6 +162,29 @@ function countGeminiContentsTokens(contents: any[], model: string): number {
   return total;
 }
 
+function applyReverseMapping(targetContent: string, replacementContent: string, compressionMap: any[]): { target: string, replacement: string } {
+  if (!compressionMap || compressionMap.length === 0) return { target: targetContent, replacement: replacementContent };
+  for (const entry of compressionMap) {
+    const { original, compressed } = entry;
+    const idx = compressed.indexOf(targetContent);
+    if (idx !== -1) {
+      const prefix = compressed.substring(0, idx);
+      const startLine = prefix.split('\n').length - 1;
+      const endLine = startLine + targetContent.split('\n').length - 1;
+      
+      const originalLines = original.split('\n');
+      const compressedLines = compressed.split('\n');
+      
+      const expandedTarget = originalLines.slice(startLine, endLine + 1).join('\n');
+      const fullCompressedTarget = compressedLines.slice(startLine, endLine + 1).join('\n');
+      const expandedReplacement = fullCompressedTarget.replace(targetContent, replacementContent);
+      
+      return { target: expandedTarget, replacement: expandedReplacement };
+    }
+  }
+  return { target: targetContent, replacement: replacementContent };
+}
+
 function aggregateCoverage(target: any, source: any) {
   if (!source) return;
   if (!target.json) {
@@ -196,7 +219,8 @@ async function getOptimizedMessages(
   model: string,
   disableMasking?: boolean,
   outCachedContents: any[] = [],
-  outCoverageMetrics: any = null
+  outCoverageMetrics: any = null,
+  outCompressionMap: any[] = []
 ): Promise<any[]> {
   if (!originalMessages) return originalMessages;
   const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -215,6 +239,9 @@ async function getOptimizedMessages(
         }
         if (opt.coverage && outCoverageMetrics) {
           aggregateCoverage(outCoverageMetrics, opt.coverage);
+        }
+        if (opt.compressionMap) {
+          outCompressionMap.push(...opt.compressionMap);
         }
       } else if (cleanMsg.role === 'tool') {
         newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
@@ -282,7 +309,8 @@ async function getOptimizedGeminiContents(
   model: string,
   disableMasking?: boolean,
   outCachedContents: any[] = [],
-  outCoverageMetrics: any = null
+  outCoverageMetrics: any = null,
+  outCompressionMap: any[] = []
 ): Promise<any[]> {
   if (!originalContents) return originalContents;
   const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -301,6 +329,9 @@ async function getOptimizedGeminiContents(
         }
         if (opt.coverage && outCoverageMetrics) {
           aggregateCoverage(outCoverageMetrics, opt.coverage);
+        }
+        if (opt.compressionMap) {
+          outCompressionMap.push(...opt.compressionMap);
         }
       } catch (e: any) {
         console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
@@ -389,17 +420,7 @@ function injectCCRTool(provider: string, body: any) {
 }
 
 function injectSystemInstructions(provider: string, body: any, config: any, contextReport: any) {
-  let instructions: string[] = [];
-  if (config.verbositySteering !== false) {
-    instructions.push("Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.");
-  }
-  if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
-    instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
-  }
-  if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
-    instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
-  }
-
+  const instructions = VerbositySteering.getSteeringInstructions(config, contextReport);
   if (instructions.length === 0) return;
   const steeringMsg = instructions.join("\n\n");
   if (provider === 'openai') {
@@ -486,7 +507,8 @@ async function executeUpstreamRequest(
   provider: 'openai' | 'anthropic' | 'gemini',
   targetUrl: string,
   headers: any,
-  requestBody: any
+  requestBody: any,
+  globalCompressionMap: any[] = []
 ): Promise<{ response: Response; resBody: any }> {
   const response = await fetch(targetUrl, {
     method: 'POST',
@@ -568,7 +590,80 @@ async function executeUpstreamRequest(
       });
     }
 
-    return executeUpstreamRequest(provider, targetUrl, headers, requestBody);
+    return executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap);
+  }
+  
+  if (globalCompressionMap.length > 0) {
+    if (provider === 'openai') {
+      if (resBody.choices?.[0]?.message?.tool_calls) {
+        for (const tc of resBody.choices[0].message.tool_calls) {
+          if (tc.function?.name === 'replace_file_content' || tc.function?.name === 'edit_file' || tc.function?.name === 'multi_replace_file_content') {
+            try {
+              const args = JSON.parse(tc.function.arguments);
+              if (args.TargetContent && args.ReplacementContent) {
+                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                args.TargetContent = target;
+                args.ReplacementContent = replacement;
+              } else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                for (const chunk of args.ReplacementChunks) {
+                  if (chunk.TargetContent && chunk.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                    chunk.TargetContent = target;
+                    chunk.ReplacementContent = replacement;
+                  }
+                }
+              }
+              tc.function.arguments = JSON.stringify(args);
+            } catch {}
+          }
+        }
+      }
+    } else if (provider === 'anthropic') {
+      if (resBody.content) {
+        for (const block of resBody.content) {
+          if (block.type === 'tool_use' && (block.name === 'replace_file_content' || block.name === 'edit_file' || block.name === 'multi_replace_file_content')) {
+            if (block.input) {
+              if (block.input.TargetContent && block.input.ReplacementContent) {
+                const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap);
+                block.input.TargetContent = target;
+                block.input.ReplacementContent = replacement;
+              } else if (block.input.ReplacementChunks && Array.isArray(block.input.ReplacementChunks)) {
+                for (const chunk of block.input.ReplacementChunks) {
+                  if (chunk.TargetContent && chunk.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                    chunk.TargetContent = target;
+                    chunk.ReplacementContent = replacement;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else if (provider === 'gemini') {
+      if (resBody.candidates?.[0]?.content?.parts) {
+        for (const part of resBody.candidates[0].content.parts) {
+          if (part.functionCall && (part.functionCall.name === 'replace_file_content' || part.functionCall.name === 'edit_file' || part.functionCall.name === 'multi_replace_file_content')) {
+            const args = part.functionCall.args;
+            if (args) {
+              if (args.TargetContent && args.ReplacementContent) {
+                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                args.TargetContent = target;
+                args.ReplacementContent = replacement;
+              } else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                for (const chunk of args.ReplacementChunks) {
+                  if (chunk.TargetContent && chunk.ReplacementContent) {
+                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                    chunk.TargetContent = target;
+                    chunk.ReplacementContent = replacement;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   return { response, resBody };
@@ -583,7 +678,8 @@ async function proxyStreamWithCCR(
   sessionId: string,
   finalModel: string,
   estimation: any,
-  savedTokens: number
+  savedTokens: number,
+  globalCompressionMap: any[] = []
 ): Promise<ReadableStream> {
   let inputAccumulated = 0;
   let outputAccumulated = 0;
@@ -805,8 +901,128 @@ async function proxyStreamWithCCR(
 
           return runTurn(body);
         } else {
-          for (const chunk of bufferChunks) {
-            controller.enqueue(chunk);
+          let needsReverseMapping = false;
+          if (globalCompressionMap.length > 0) {
+            if (provider === 'openai' && assistantToolCallsAccumulated.some(tc => tc.function.name === 'replace_file_content' || tc.function.name === 'edit_file' || tc.function.name === 'multi_replace_file_content')) needsReverseMapping = true;
+            if (provider === 'anthropic' && anthropicContentBlocks.some(b => b.type === 'tool_use' && (b.name === 'replace_file_content' || b.name === 'edit_file' || b.name === 'multi_replace_file_content'))) needsReverseMapping = true;
+            if (provider === 'gemini' && fullAssistantResponseForTurn?.parts?.some((p: any) => p.functionCall && (p.functionCall.name === 'replace_file_content' || p.functionCall.name === 'edit_file' || p.functionCall.name === 'multi_replace_file_content'))) needsReverseMapping = true;
+          }
+
+          if (needsReverseMapping) {
+            console.log(`[Stream CCR] Reverse mapping edit tool for request ${requestId}`);
+            const encoder = new TextEncoder();
+            if (provider === 'openai') {
+              for (const tc of assistantToolCallsAccumulated) {
+                if (tc.function.name === 'replace_file_content' || tc.function.name === 'edit_file' || tc.function.name === 'multi_replace_file_content') {
+                  try {
+                    const args = JSON.parse(tc.function.arguments);
+                    if (args.TargetContent && args.ReplacementContent) {
+                      const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                      args.TargetContent = target;
+                      args.ReplacementContent = replacement;
+                    } else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                      for (const chunk of args.ReplacementChunks) {
+                        if (chunk.TargetContent && chunk.ReplacementContent) {
+                          const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                          chunk.TargetContent = target;
+                          chunk.ReplacementContent = replacement;
+                        }
+                      }
+                    }
+                    tc.function.arguments = JSON.stringify(args);
+                  } catch {}
+                }
+              }
+              const chunkObj = {
+                id: `chatcmpl-${requestId}`,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: finalModel,
+                choices: [{
+                  index: 0,
+                  delta: {
+                    role: 'assistant',
+                    content: assistantTextAccumulated || null,
+                    tool_calls: assistantToolCallsAccumulated.map(tc => ({
+                      index: tc.index,
+                      id: tc.id,
+                      type: 'function',
+                      function: tc.function
+                    }))
+                  },
+                  finish_reason: 'tool_calls'
+                }]
+              };
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunkObj)}\n\n`));
+              controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+            } else if (provider === 'anthropic') {
+              for (const b of anthropicContentBlocks) {
+                if (b.type === 'tool_use' && (b.name === 'replace_file_content' || b.name === 'edit_file' || b.name === 'multi_replace_file_content')) {
+                  try {
+                    let args = typeof b.input === 'string' ? JSON.parse(b.input) : b.input;
+                    if (args.TargetContent && args.ReplacementContent) {
+                      const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                      args.TargetContent = target;
+                      args.ReplacementContent = replacement;
+                    } else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                      for (const chunk of args.ReplacementChunks) {
+                        if (chunk.TargetContent && chunk.ReplacementContent) {
+                          const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                          chunk.TargetContent = target;
+                          chunk.ReplacementContent = replacement;
+                        }
+                      }
+                    }
+                    b.input = args;
+                  } catch {}
+                }
+              }
+              
+              controller.enqueue(encoder.encode(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: `msg_${requestId}`, type: 'message', role: 'assistant', content: [], model: finalModel, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`));
+              for (let i = 0; i < anthropicContentBlocks.length; i++) {
+                const b = anthropicContentBlocks[i];
+                if (b.type === 'text') {
+                  controller.enqueue(encoder.encode(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: i, content_block: { type: 'text', text: '' } })}\n\n`));
+                  controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: i, delta: { type: 'text_delta', text: b.text } })}\n\n`));
+                  controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: i })}\n\n`));
+                } else if (b.type === 'tool_use') {
+                  controller.enqueue(encoder.encode(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } })}\n\n`));
+                  controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } })}\n\n`));
+                  controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: i })}\n\n`));
+                }
+              }
+              controller.enqueue(encoder.encode(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 0 } })}\n\n`));
+              controller.enqueue(encoder.encode(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`));
+            } else if (provider === 'gemini') {
+              if (fullAssistantResponseForTurn?.parts) {
+                for (const p of fullAssistantResponseForTurn.parts) {
+                  if (p.functionCall && (p.functionCall.name === 'replace_file_content' || p.functionCall.name === 'edit_file' || p.functionCall.name === 'multi_replace_file_content')) {
+                    try {
+                      let args = typeof p.functionCall.args === 'string' ? JSON.parse(p.functionCall.args) : p.functionCall.args;
+                      if (args.TargetContent && args.ReplacementContent) {
+                        const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                        args.TargetContent = target;
+                        args.ReplacementContent = replacement;
+                      } else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                        for (const chunk of args.ReplacementChunks) {
+                          if (chunk.TargetContent && chunk.ReplacementContent) {
+                            const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                            chunk.TargetContent = target;
+                            chunk.ReplacementContent = replacement;
+                          }
+                        }
+                      }
+                      p.functionCall.args = args;
+                    } catch {}
+                  }
+                }
+              }
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: fullAssistantResponseForTurn }] })}\n\n`));
+            }
+          } else {
+            for (const chunk of bufferChunks) {
+              controller.enqueue(chunk);
+            }
           }
         }
       }
@@ -1217,6 +1433,7 @@ async function handleInterception(
   let finalRequestBody = request.body;
   let finalRequest = parsedRequest;
   let savedTokens = 0;
+  const globalCompressionMap: any[] = [];
 
   if (action === 'optimize') {
     const cleanMsgs = contextReport.cleanMessages;
@@ -1226,7 +1443,7 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage)
+        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
       };
       
       // Optimize top-level Anthropic system prompt
@@ -1243,6 +1460,7 @@ async function handleInterception(
               const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
               if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
               if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
+              if (opt.compressionMap) globalCompressionMap.push(...opt.compressionMap);
               finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
             }
           }
@@ -1251,7 +1469,7 @@ async function handleInterception(
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage)
+        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
       };
       
       // Optimize top-level Gemini systemInstruction
@@ -1262,6 +1480,7 @@ async function handleInterception(
             const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
             if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
             if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
+            if (opt.compressionMap) globalCompressionMap.push(...opt.compressionMap);
             finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
           }
         }
@@ -1406,7 +1625,8 @@ async function handleInterception(
         provider,
         targetUrl,
         forwardHeaders,
-        finalRequestBody
+        finalRequestBody,
+        globalCompressionMap
       );
 
       if (!upstreamRes.ok) {
@@ -1453,7 +1673,8 @@ async function handleInterception(
       sessionId,
       finalRequest.model,
       estimation,
-      savedTokens
+      savedTokens,
+      globalCompressionMap
     );
 
     return reply.send(stream);

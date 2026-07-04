@@ -28,6 +28,7 @@ export interface OptimizationResult {
     savingsPercent: number;
     cachedContents?: CachedContent[];
     coverage?: CoverageMetrics;
+    compressionMap?: any[];
 }
 export interface PromptOptimizerOptions {
     disableCodeCompression?: boolean;
@@ -39,3 +40,4 @@ export declare class PromptOptimizer {
 }
 export * from './tools';
 export { ToolPruner };
+export * from './verbosity-steering';

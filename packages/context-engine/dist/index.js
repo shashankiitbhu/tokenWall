@@ -171,18 +171,7 @@ class ContextAnalyzer {
         // Tool-Aware Compression Bypass
         // If edit-capable tools are present, we must preserve exact whitespace, comments, 
         // and line numbers to prevent silent write-path corruption or tool exact-match failures.
-        const hasEditTools = req.toolsSchemaText && (req.toolsSchemaText.includes('replace_file_content') ||
-            req.toolsSchemaText.includes('insert_at_line') ||
-            req.toolsSchemaText.includes('edit_file') ||
-            req.toolsSchemaText.includes('write_to_file') ||
-            req.toolsSchemaText.includes('apply_diff'));
         const effectiveConfig = (config ? { ...config } : {});
-        if (hasEditTools) {
-            effectiveConfig.codeCompression = false;
-            if (!effectiveConfig.importance)
-                effectiveConfig.importance = {};
-            effectiveConfig.importance.policy = 'conservative';
-        }
         const isReversible = effectiveConfig.reversibleCompression !== false;
         for (let i = 0; i < cleanMessages.length; i++) {
             const msg = cleanMessages[i];

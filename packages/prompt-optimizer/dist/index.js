@@ -184,6 +184,7 @@ class PromptOptimizer {
     async optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
+        let compressionMap = [];
         const coverage = {
             json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
             code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
@@ -215,6 +216,9 @@ class PromptOptimizer {
         const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
         optimized = codeResult.optimizedText;
         allCachedContents.push(...codeResult.cachedContents);
+        if (codeResult.compressionMap) {
+            compressionMap.push(...codeResult.compressionMap);
+        }
         if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
             coverage.sampledFailures.push({ type: 'magika_mismatch', reason: 'Magika detected code, but regex found no fence', snippet: prompt.substring(0, 200) });
         }
@@ -240,9 +244,11 @@ class PromptOptimizer {
             tokensSaved,
             savingsPercent,
             cachedContents: allCachedContents,
-            coverage
+            coverage,
+            compressionMap
         };
     }
 }
 exports.PromptOptimizer = PromptOptimizer;
 __exportStar(require("./tools"), exports);
+__exportStar(require("./verbosity-steering"), exports);

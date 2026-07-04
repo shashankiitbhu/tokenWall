@@ -8,20 +8,20 @@
   - `[x]` Wrap `BudgetEvaluator.evaluate` in try/catch.
   - `[x]` Wrap `ModelRouter.generateRoutingOptions` in try/catch.
   - `[x]` Wrap `PromptOptimizer.optimize` and `ToolRouter` in try/catch.
-- `[/]` **Write-path safety for `CodeCompressor`**
+- `[x]` **Write-path safety for `CodeCompressor`**
   - *Impact: Critical | Difficulty: Medium*
   - `[x]` Interim fix: detect turns where an edit-capable tool is active and serve those files **uncompressed**.
-  - `[ ]` Proper fix (can follow): build a `CompressionMap` (original↔compressed offset ranges) per file; reverse-map outbound edits.
-  - `[ ]` Fallback: If reverse-mapping fails, fail open to a fresh `read_file`.
+  - `[x]` Proper fix (can follow): build a `CompressionMap` (original↔compressed offset ranges) per file; reverse-map outbound edits.
+  - `[x]` Fallback: If reverse-mapping fails, fail open (allow tool execution to fail gracefully so the agent falls back to fresh `read_file`).
 - `[x]` **Replace regex comment/whitespace stripping with tree-sitter node-span extraction**
   - *Impact: High | Difficulty: Medium*
   - `[x]` Install `web-tree-sitter` in `@tokenwall/prompt-optimizer`. (Changed to native tree-sitter bindings)
   - `[x]` Add `tree-sitter-javascript.wasm` and `tree-sitter-typescript.wasm`. (Changed to native tree-sitter bindings)
   - `[x]` Refactor `packages/prompt-optimizer/src/code-compressor.ts` to use `web-tree-sitter` for AST parsing.
   - `[x]` Implement slice-based comment excision algorithm based on `comment` node byte ranges.
-- `[ ]` **Fix shadow-state hash/diff ordering**
+- `[x]` **Fix shadow-state hash/diff ordering**
   - *Impact: High | Difficulty: Low*
-  - Confirm `ShadowStateStore.reconcile` hashes and diffs **original** file content, not post-`CodeCompressor` output.
+  - `[x]` Confirmed `fileShadowState` diffs **original** file content, not post-`CodeCompressor` output (it runs in `ContextAnalyzer` prior to optimization).
 - `[x]` **Quality harness: expand fixtures for the above**
   - *Impact: Critical | Difficulty: Low*
   - (Completed during the interim fix implementation).
@@ -38,7 +38,7 @@
 - `[x]` **Lost-in-the-middle mitigation**
 - `[ ]` **Template diffing**
 - `[ ]` **Hierarchical summarization**
-- `[ ]` **AST-aware chunking (full function/class-boundary chunking)**
+- `[x]` **AST-aware chunking (full function/class-boundary chunking)**
 
 ## 3. Lower Priority
 - `[ ]` **Relevance-scored context packing (MMR / cross-encoder)**

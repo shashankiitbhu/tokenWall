@@ -31,6 +31,8 @@ export interface OptimizationResult {
   savingsPercent: number;
   cachedContents?: CachedContent[];
   coverage?: CoverageMetrics;
+  compressionMap?: any[];
+  chunkedBlocks?: any[];
 }
 
 export interface PromptOptimizerOptions {
@@ -209,6 +211,8 @@ export class PromptOptimizer {
     const originalTokens = countTokens(prompt, model);
     
     let allCachedContents: CachedContent[] = [];
+    let compressionMap: any[] = [];
+    let chunkedBlocks: any[] = [];
     
     const coverage: CoverageMetrics = {
       json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
@@ -242,6 +246,12 @@ export class PromptOptimizer {
     const codeResult = CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
     optimized = codeResult.optimizedText;
     allCachedContents.push(...codeResult.cachedContents);
+    if (codeResult.compressionMap) {
+      compressionMap.push(...codeResult.compressionMap);
+    }
+    if (codeResult.chunkedBlocks) {
+      chunkedBlocks.push(...codeResult.chunkedBlocks);
+    }
 
     if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
       coverage.sampledFailures.push({ type: 'magika_mismatch', reason: 'Magika detected code, but regex found no fence', snippet: prompt.substring(0, 200) });
@@ -273,10 +283,13 @@ export class PromptOptimizer {
       tokensSaved,
       savingsPercent,
       cachedContents: allCachedContents,
-      coverage
+      coverage,
+      compressionMap,
+      chunkedBlocks
     };
   }
 }
 
 export * from './tools';
 export { ToolPruner };
+export * from './verbosity-steering';

@@ -152,6 +152,26 @@ function countGeminiContentsTokens(contents, model) {
     }
     return total;
 }
+function applyReverseMapping(targetContent, replacementContent, compressionMap) {
+    if (!compressionMap || compressionMap.length === 0)
+        return { target: targetContent, replacement: replacementContent };
+    for (const entry of compressionMap) {
+        const { original, compressed } = entry;
+        const idx = compressed.indexOf(targetContent);
+        if (idx !== -1) {
+            const prefix = compressed.substring(0, idx);
+            const startLine = prefix.split('\n').length - 1;
+            const endLine = startLine + targetContent.split('\n').length - 1;
+            const originalLines = original.split('\n');
+            const compressedLines = compressed.split('\n');
+            const expandedTarget = originalLines.slice(startLine, endLine + 1).join('\n');
+            const fullCompressedTarget = compressedLines.slice(startLine, endLine + 1).join('\n');
+            const expandedReplacement = fullCompressedTarget.replace(targetContent, replacementContent);
+            return { target: expandedTarget, replacement: expandedReplacement };
+        }
+    }
+    return { target: targetContent, replacement: replacementContent };
+}
 function aggregateCoverage(target, source) {
     if (!source)
         return;
@@ -177,7 +197,7 @@ function aggregateCoverage(target, source) {
         }
     }
 }
-async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
+async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
     if (!originalMessages)
         return originalMessages;
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -196,6 +216,9 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                 }
                 if (opt.coverage && outCoverageMetrics) {
                     aggregateCoverage(outCoverageMetrics, opt.coverage);
+                }
+                if (opt.compressionMap) {
+                    outCompressionMap.push(...opt.compressionMap);
                 }
             }
             else if (cleanMsg.role === 'tool') {
@@ -260,7 +283,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
     }
     return newMessages;
 }
-async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
+async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
     if (!originalContents)
         return originalContents;
     const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -279,6 +302,9 @@ async function getOptimizedGeminiContents(originalContents, cleanMessages, model
                 }
                 if (opt.coverage && outCoverageMetrics) {
                     aggregateCoverage(outCoverageMetrics, opt.coverage);
+                }
+                if (opt.compressionMap) {
+                    outCompressionMap.push(...opt.compressionMap);
                 }
             }
             catch (e) {
@@ -371,16 +397,7 @@ function injectCCRTool(provider, body) {
     }
 }
 function injectSystemInstructions(provider, body, config, contextReport) {
-    let instructions = [];
-    if (config.verbositySteering !== false) {
-        instructions.push("Be highly concise. Avoid explaining context, preambles, or restating unchanged files. Output only the requested edits or response directly.");
-    }
-    if (contextReport?.deduplicationsApplied && contextReport.deduplicationsApplied > 0) {
-        instructions.push("TokenWall Optimization: To save context space, redundant file contents may be replaced with `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for <path>]`. If you see this marker, DO NOT ask the user to provide the file. You already have the full file contents earlier in this conversation history. Scroll up to read it.");
-    }
-    if (contextReport?.cachedContents && contextReport.cachedContents.length > 0) {
-        instructions.push("TokenWall Reversible Masking: To save context space, some large function bodies or arrays have been masked with `[TokenWall Reversible Content: <id>]`. If you need to edit or precisely reason about a masked region, you MUST call the `tokenwall_retrieve_content` tool first. If uncertain, retrieve rather than guess.");
-    }
+    const instructions = prompt_optimizer_1.VerbositySteering.getSteeringInstructions(config, contextReport);
     if (instructions.length === 0)
         return;
     const steeringMsg = instructions.join("\n\n");
@@ -470,7 +487,7 @@ function injectAnthropicCacheControl(body) {
         }
     }
 }
-async function executeUpstreamRequest(provider, targetUrl, headers, requestBody) {
+async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
     const response = await fetch(targetUrl, {
         method: 'POST',
         headers,
@@ -549,11 +566,89 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody)
                     }]
             });
         }
-        return executeUpstreamRequest(provider, targetUrl, headers, requestBody);
+        return executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap);
+    }
+    if (globalCompressionMap.length > 0) {
+        if (provider === 'openai') {
+            if (resBody.choices?.[0]?.message?.tool_calls) {
+                for (const tc of resBody.choices[0].message.tool_calls) {
+                    if (tc.function?.name === 'replace_file_content' || tc.function?.name === 'edit_file' || tc.function?.name === 'multi_replace_file_content') {
+                        try {
+                            const args = JSON.parse(tc.function.arguments);
+                            if (args.TargetContent && args.ReplacementContent) {
+                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                args.TargetContent = target;
+                                args.ReplacementContent = replacement;
+                            }
+                            else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                                for (const chunk of args.ReplacementChunks) {
+                                    if (chunk.TargetContent && chunk.ReplacementContent) {
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        chunk.TargetContent = target;
+                                        chunk.ReplacementContent = replacement;
+                                    }
+                                }
+                            }
+                            tc.function.arguments = JSON.stringify(args);
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+        else if (provider === 'anthropic') {
+            if (resBody.content) {
+                for (const block of resBody.content) {
+                    if (block.type === 'tool_use' && (block.name === 'replace_file_content' || block.name === 'edit_file' || block.name === 'multi_replace_file_content')) {
+                        if (block.input) {
+                            if (block.input.TargetContent && block.input.ReplacementContent) {
+                                const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap);
+                                block.input.TargetContent = target;
+                                block.input.ReplacementContent = replacement;
+                            }
+                            else if (block.input.ReplacementChunks && Array.isArray(block.input.ReplacementChunks)) {
+                                for (const chunk of block.input.ReplacementChunks) {
+                                    if (chunk.TargetContent && chunk.ReplacementContent) {
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        chunk.TargetContent = target;
+                                        chunk.ReplacementContent = replacement;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (provider === 'gemini') {
+            if (resBody.candidates?.[0]?.content?.parts) {
+                for (const part of resBody.candidates[0].content.parts) {
+                    if (part.functionCall && (part.functionCall.name === 'replace_file_content' || part.functionCall.name === 'edit_file' || part.functionCall.name === 'multi_replace_file_content')) {
+                        const args = part.functionCall.args;
+                        if (args) {
+                            if (args.TargetContent && args.ReplacementContent) {
+                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                args.TargetContent = target;
+                                args.ReplacementContent = replacement;
+                            }
+                            else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                                for (const chunk of args.ReplacementChunks) {
+                                    if (chunk.TargetContent && chunk.ReplacementContent) {
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        chunk.TargetContent = target;
+                                        chunk.ReplacementContent = replacement;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     return { response, resBody };
 }
-async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens) {
+async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = []) {
     let inputAccumulated = 0;
     let outputAccumulated = 0;
     let streamFailed = false;
@@ -785,8 +880,139 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                     return runTurn(body);
                 }
                 else {
-                    for (const chunk of bufferChunks) {
-                        controller.enqueue(chunk);
+                    let needsReverseMapping = false;
+                    if (globalCompressionMap.length > 0) {
+                        if (provider === 'openai' && assistantToolCallsAccumulated.some(tc => tc.function.name === 'replace_file_content' || tc.function.name === 'edit_file' || tc.function.name === 'multi_replace_file_content'))
+                            needsReverseMapping = true;
+                        if (provider === 'anthropic' && anthropicContentBlocks.some(b => b.type === 'tool_use' && (b.name === 'replace_file_content' || b.name === 'edit_file' || b.name === 'multi_replace_file_content')))
+                            needsReverseMapping = true;
+                        if (provider === 'gemini' && fullAssistantResponseForTurn?.parts?.some((p) => p.functionCall && (p.functionCall.name === 'replace_file_content' || p.functionCall.name === 'edit_file' || p.functionCall.name === 'multi_replace_file_content')))
+                            needsReverseMapping = true;
+                    }
+                    if (needsReverseMapping) {
+                        console.log(`[Stream CCR] Reverse mapping edit tool for request ${requestId}`);
+                        const encoder = new TextEncoder();
+                        if (provider === 'openai') {
+                            for (const tc of assistantToolCallsAccumulated) {
+                                if (tc.function.name === 'replace_file_content' || tc.function.name === 'edit_file' || tc.function.name === 'multi_replace_file_content') {
+                                    try {
+                                        const args = JSON.parse(tc.function.arguments);
+                                        if (args.TargetContent && args.ReplacementContent) {
+                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                            args.TargetContent = target;
+                                            args.ReplacementContent = replacement;
+                                        }
+                                        else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                                            for (const chunk of args.ReplacementChunks) {
+                                                if (chunk.TargetContent && chunk.ReplacementContent) {
+                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                    chunk.TargetContent = target;
+                                                    chunk.ReplacementContent = replacement;
+                                                }
+                                            }
+                                        }
+                                        tc.function.arguments = JSON.stringify(args);
+                                    }
+                                    catch { }
+                                }
+                            }
+                            const chunkObj = {
+                                id: `chatcmpl-${requestId}`,
+                                object: 'chat.completion.chunk',
+                                created: Math.floor(Date.now() / 1000),
+                                model: finalModel,
+                                choices: [{
+                                        index: 0,
+                                        delta: {
+                                            role: 'assistant',
+                                            content: assistantTextAccumulated || null,
+                                            tool_calls: assistantToolCallsAccumulated.map(tc => ({
+                                                index: tc.index,
+                                                id: tc.id,
+                                                type: 'function',
+                                                function: tc.function
+                                            }))
+                                        },
+                                        finish_reason: 'tool_calls'
+                                    }]
+                            };
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunkObj)}\n\n`));
+                            controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+                        }
+                        else if (provider === 'anthropic') {
+                            for (const b of anthropicContentBlocks) {
+                                if (b.type === 'tool_use' && (b.name === 'replace_file_content' || b.name === 'edit_file' || b.name === 'multi_replace_file_content')) {
+                                    try {
+                                        let args = typeof b.input === 'string' ? JSON.parse(b.input) : b.input;
+                                        if (args.TargetContent && args.ReplacementContent) {
+                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                            args.TargetContent = target;
+                                            args.ReplacementContent = replacement;
+                                        }
+                                        else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                                            for (const chunk of args.ReplacementChunks) {
+                                                if (chunk.TargetContent && chunk.ReplacementContent) {
+                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                    chunk.TargetContent = target;
+                                                    chunk.ReplacementContent = replacement;
+                                                }
+                                            }
+                                        }
+                                        b.input = args;
+                                    }
+                                    catch { }
+                                }
+                            }
+                            controller.enqueue(encoder.encode(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: `msg_${requestId}`, type: 'message', role: 'assistant', content: [], model: finalModel, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`));
+                            for (let i = 0; i < anthropicContentBlocks.length; i++) {
+                                const b = anthropicContentBlocks[i];
+                                if (b.type === 'text') {
+                                    controller.enqueue(encoder.encode(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: i, content_block: { type: 'text', text: '' } })}\n\n`));
+                                    controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: i, delta: { type: 'text_delta', text: b.text } })}\n\n`));
+                                    controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: i })}\n\n`));
+                                }
+                                else if (b.type === 'tool_use') {
+                                    controller.enqueue(encoder.encode(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } })}\n\n`));
+                                    controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } })}\n\n`));
+                                    controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: i })}\n\n`));
+                                }
+                            }
+                            controller.enqueue(encoder.encode(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 0 } })}\n\n`));
+                            controller.enqueue(encoder.encode(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`));
+                        }
+                        else if (provider === 'gemini') {
+                            if (fullAssistantResponseForTurn?.parts) {
+                                for (const p of fullAssistantResponseForTurn.parts) {
+                                    if (p.functionCall && (p.functionCall.name === 'replace_file_content' || p.functionCall.name === 'edit_file' || p.functionCall.name === 'multi_replace_file_content')) {
+                                        try {
+                                            let args = typeof p.functionCall.args === 'string' ? JSON.parse(p.functionCall.args) : p.functionCall.args;
+                                            if (args.TargetContent && args.ReplacementContent) {
+                                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                                args.TargetContent = target;
+                                                args.ReplacementContent = replacement;
+                                            }
+                                            else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
+                                                for (const chunk of args.ReplacementChunks) {
+                                                    if (chunk.TargetContent && chunk.ReplacementContent) {
+                                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                        chunk.TargetContent = target;
+                                                        chunk.ReplacementContent = replacement;
+                                                    }
+                                                }
+                                            }
+                                            p.functionCall.args = args;
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: fullAssistantResponseForTurn }] })}\n\n`));
+                        }
+                    }
+                    else {
+                        for (const chunk of bufferChunks) {
+                            controller.enqueue(chunk);
+                        }
                     }
                 }
             }
@@ -882,8 +1108,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
             telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ModelRouter', error: err.message } });
         }
     }
-    // We need hasEditTools early for attribution missed opportunities
-    const hasEditTools = request.body.tools && request.body.tools.some((t) => ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name));
+    // Interim safety guard has been removed: we no longer check for edit tools.
     let attribution = null;
     let categorySavings = {};
     try {
@@ -953,7 +1178,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         console.log(`Output\n${runningTotal.toLocaleString()}`);
         console.log('\nLargest remaining opportunity:');
         const remain = [
-            { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: hasEditTools ? 'Write-path safety bypass' : null },
+            { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: null },
             { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']), reason: null },
             { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']), reason: null },
             { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: categorySavings['Tool pruning'] > 0 ? null : 'Safe heuristics preserved all tools' },
@@ -983,7 +1208,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (!isKillSwitchActive) {
         try {
             optimization = lastUserMsg
-                ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null })
+                ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null })
                 : undefined;
         }
         catch (err) {
@@ -1145,6 +1370,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     let finalRequestBody = request.body;
     let finalRequest = parsedRequest;
     let savedTokens = 0;
+    const globalCompressionMap = [];
     if (action === 'optimize') {
         const cleanMsgs = contextReport.cleanMessages;
         const lastUserIdx = cleanMsgs.map((m) => m.role).lastIndexOf('user');
@@ -1152,12 +1378,12 @@ async function handleInterception(provider, targetUrl, request, reply) {
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
             };
             // Optimize top-level Anthropic system prompt
             if (provider === 'anthropic' && finalRequestBody.system) {
                 if (typeof finalRequestBody.system === 'string') {
-                    const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                    const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
                     finalRequestBody.system = opt.optimizedText;
                     if (opt.cachedContents)
                         contextReport.cachedContents.push(...opt.cachedContents);
@@ -1168,11 +1394,13 @@ async function handleInterception(provider, targetUrl, request, reply) {
                     for (let i = 0; i < finalRequestBody.system.length; i++) {
                         const block = finalRequestBody.system[i];
                         if (block && block.type === 'text' && typeof block.text === 'string') {
-                            const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                            const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
                             if (opt.cachedContents)
                                 contextReport.cachedContents.push(...opt.cachedContents);
                             if (opt.coverage)
                                 aggregateCoverage(contextReport.coverage, opt.coverage);
+                            if (opt.compressionMap)
+                                globalCompressionMap.push(...opt.compressionMap);
                             finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
                         }
                     }
@@ -1182,18 +1410,20 @@ async function handleInterception(provider, targetUrl, request, reply) {
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
             };
             // Optimize top-level Gemini systemInstruction
             if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
                 for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
                     const part = finalRequestBody.systemInstruction.parts[i];
                     if (part && typeof part.text === 'string') {
-                        const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                        const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
                         if (opt.cachedContents)
                             contextReport.cachedContents.push(...opt.cachedContents);
                         if (opt.coverage)
                             aggregateCoverage(contextReport.coverage, opt.coverage);
+                        if (opt.compressionMap)
+                            globalCompressionMap.push(...opt.compressionMap);
                         finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
                     }
                 }
@@ -1322,7 +1552,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     try {
         if (!parsedRequest.stream) {
             // Non-streaming response handling with CCR recursive check
-            const { response: upstreamRes, resBody } = await executeUpstreamRequest(provider, targetUrl, forwardHeaders, finalRequestBody);
+            const { response: upstreamRes, resBody } = await executeUpstreamRequest(provider, targetUrl, forwardHeaders, finalRequestBody, globalCompressionMap);
             if (!upstreamRes.ok) {
                 const errorText = await upstreamRes.text();
                 telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
@@ -1350,7 +1580,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         reply.header('content-type', 'text/event-stream');
         reply.header('cache-control', 'no-cache');
         reply.header('connection', 'keep-alive');
-        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens);
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap);
         return reply.send(stream);
     }
     catch (error) {

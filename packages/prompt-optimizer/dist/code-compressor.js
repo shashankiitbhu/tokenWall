@@ -37,14 +37,18 @@ class CodeCompressor {
                 else
                     metrics.code.fallbackOptOutUserConfig += totalDetected;
             }
-            return { optimizedText: prompt, cachedContents: [] };
+            return { optimizedText: prompt, cachedContents: [], compressionMap: [] };
         }
         const cachedContents = [];
+        const compressionMap = [];
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
             try {
                 const sparsified = this.sparsifyCode(code, lang, cachedContents);
                 if (metrics)
                     metrics.code.successfullyOptimized++;
+                if (sparsified !== code) {
+                    compressionMap.push({ original: code, compressed: sparsified });
+                }
                 return `\`\`\`${lang}\n${sparsified}\n\`\`\``;
             }
             catch (e) {
@@ -61,6 +65,9 @@ class CodeCompressor {
                 const sparsified = this.sparsifyCode(code, ext, cachedContents);
                 if (metrics)
                     metrics.code.successfullyOptimized++;
+                if (sparsified !== code) {
+                    compressionMap.push({ original: code, compressed: sparsified });
+                }
                 // Replace only the inner code content, keep the XML tags intact
                 return match.replace(code, `\n${sparsified}\n`);
             }
@@ -72,7 +79,7 @@ class CodeCompressor {
                 return match;
             }
         });
-        return { optimizedText: optimized, cachedContents };
+        return { optimizedText: optimized, cachedContents, compressionMap };
     }
     /**
      * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
@@ -97,7 +104,8 @@ class CodeCompressor {
             const removeNodes = [];
             const walk = (node) => {
                 if (node.type === 'comment') {
-                    removeNodes.push({ startIndex: node.startIndex, endIndex: node.endIndex });
+                    const newlines = (node.text.match(/\n/g) || []).length;
+                    removeNodes.push({ startIndex: node.startIndex, endIndex: node.endIndex, replaceWith: '\n'.repeat(newlines) });
                 }
                 else if (node.type === 'function_declaration' ||
                     node.type === 'method_definition' ||
@@ -108,10 +116,11 @@ class CodeCompressor {
                         if (lines > 10) {
                             const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
                             cachedContents.push({ id, content: bodyNode.text });
+                            const newlinesToPad = Math.max(0, lines - 1);
                             removeNodes.push({
                                 startIndex: bodyNode.startIndex,
                                 endIndex: bodyNode.endIndex,
-                                replaceWith: `{ /* [TokenWall Reversible Content: ${id}] */ }`
+                                replaceWith: `{ /* [TokenWall Reversible Content: ${id}] */ }` + '\n'.repeat(newlinesToPad)
                             });
                             return; // skip walking inside the skeletonized body
                         }
