@@ -162,13 +162,42 @@ function countGeminiContentsTokens(contents: any[], model: string): number {
   return total;
 }
 
-function getOptimizedMessages(
+function aggregateCoverage(target: any, source: any) {
+  if (!source) return;
+  if (!target.json) {
+    target.json = { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 };
+    target.code = { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 };
+    target.sampledFailures = [];
+  }
+  
+  target.json.magikaDetected += source.json.magikaDetected;
+  target.json.regexTotalDetected += source.json.regexTotalDetected;
+  target.json.successfullyOptimized += source.json.successfullyOptimized;
+  target.json.fallbackParseFailure += source.json.fallbackParseFailure;
+  
+  target.code.magikaDetected += source.code.magikaDetected;
+  target.code.regexTotalDetected += source.code.regexTotalDetected;
+  target.code.successfullyOptimized += source.code.successfullyOptimized;
+  target.code.fallbackParseFailure += source.code.fallbackParseFailure;
+  target.code.fallbackOptOutSystemGuard += source.code.fallbackOptOutSystemGuard;
+  target.code.fallbackOptOutUserConfig += source.code.fallbackOptOutUserConfig;
+  
+  if (source.sampledFailures && source.sampledFailures.length > 0) {
+    target.sampledFailures.push(...source.sampledFailures);
+    if (target.sampledFailures.length > 20) {
+      target.sampledFailures = target.sampledFailures.slice(-20);
+    }
+  }
+}
+
+async function getOptimizedMessages(
   originalMessages: any[],
   cleanMessages: any[],
   model: string,
   disableCodeCompression?: boolean,
-  outCachedContents: any[] = []
-): any[] {
+  outCachedContents: any[] = [],
+  outCoverageMetrics: any = null
+): Promise<any[]> {
   if (!originalMessages) return originalMessages;
   const newMessages = JSON.parse(JSON.stringify(originalMessages));
   for (let i = 0; i < newMessages.length; i++) {
@@ -179,10 +208,13 @@ function getOptimizedMessages(
     let newText = cleanMsg.content;
     try {
       if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-        const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
+        }
+        if (opt.coverage && outCoverageMetrics) {
+          aggregateCoverage(outCoverageMetrics, opt.coverage);
         }
       } else if (cleanMsg.role === 'tool') {
         newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
@@ -244,13 +276,14 @@ function getOptimizedMessages(
   return newMessages;
 }
 
-function getOptimizedGeminiContents(
+async function getOptimizedGeminiContents(
   originalContents: any[],
   cleanMessages: any[],
   model: string,
   disableCodeCompression?: boolean,
-  outCachedContents: any[] = []
-): any[] {
+  outCachedContents: any[] = [],
+  outCoverageMetrics: any = null
+): Promise<any[]> {
   if (!originalContents) return originalContents;
   const newContents = JSON.parse(JSON.stringify(originalContents));
   for (let i = 0; i < newContents.length; i++) {
@@ -261,10 +294,13 @@ function getOptimizedGeminiContents(
     let newText = cleanMsg.content;
     if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       try {
-        const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
+        }
+        if (opt.coverage && outCoverageMetrics) {
+          aggregateCoverage(outCoverageMetrics, opt.coverage);
         }
       } catch (e: any) {
         console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
@@ -856,12 +892,14 @@ async function handleInterception(
   const config = configManager.getConfig();
   const isKillSwitchActive = process.env.TOKENWALL_KILL_SWITCH === 'true';
 
-  let contextReport: any = { inefficiencies: [], cleanMessages: parsedRequest.messages };
+  let contextReport: any = { inefficiencies: [], cleanMessages: parsedRequest.messages, cachedContents: [], coverage: {} };
   let routingOptions: any = { shouldRoute: false, alternatives: [] };
 
   if (!isKillSwitchActive) {
     try {
       contextReport = await contextAnalyzer.analyze(parsedRequest, config);
+      if (!contextReport.cachedContents) contextReport.cachedContents = [];
+      if (!contextReport.coverage) contextReport.coverage = {};
     } catch (err: any) {
       console.error("[TokenWall Gateway] ContextAnalyzer failed, falling open:", err.message);
       telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ContextAnalyzer', error: err.message } });
@@ -986,7 +1024,7 @@ async function handleInterception(
   if (!isKillSwitchActive) {
     try {
       optimization = lastUserMsg
-        ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
+        ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
         : undefined;
     } catch (err: any) {
       console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
@@ -1191,48 +1229,45 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
+        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
       };
       
       // Optimize top-level Anthropic system prompt
       if (provider === 'anthropic' && finalRequestBody.system) {
         if (typeof finalRequestBody.system === 'string') {
-          const opt = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools });
+          const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
           finalRequestBody.system = opt.optimizedText;
           if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
+          if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
         } else if (Array.isArray(finalRequestBody.system)) {
-          finalRequestBody.system = finalRequestBody.system.map((block: any) => {
+          for (let i = 0; i < finalRequestBody.system.length; i++) {
+            const block = finalRequestBody.system[i];
             if (block && block.type === 'text' && typeof block.text === 'string') {
-              const opt = promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+              const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
               if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
-              return {
-                ...block,
-                text: opt.optimizedText
-              };
+              if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
+              finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
             }
-            return block;
-          });
+          }
         }
       }
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
+        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
       };
       
       // Optimize top-level Gemini systemInstruction
       if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
-        finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part: any) => {
+        for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
+          const part = finalRequestBody.systemInstruction.parts[i];
           if (part && typeof part.text === 'string') {
-            const opt = promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+            const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
             if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
-            return {
-              ...part,
-              text: opt.optimizedText
-            };
+            if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
+            finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
           }
-          return part;
-        });
+        }
       }
     }
     finalRequest = { ...parsedRequest, messages: cleanMsgs };
@@ -1270,6 +1305,17 @@ async function handleInterception(
       amount: savingsAmount,
       tokens: savedTokens
     });
+
+    if (contextReport.coverage) {
+      telemetryLogger.emitEvent({
+        eventType: 'optimization_coverage',
+        sessionId,
+        requestId,
+        metadata: {
+          coverage: contextReport.coverage
+        }
+      });
+    }
 
     // Write log for optimized request including the full body (top-level system prompts)
     try {

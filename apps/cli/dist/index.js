@@ -38933,30 +38933,55 @@ var require_code_compressor = __commonJS({
        * parses them into an AST using Tree-sitter, strips only actual comment nodes,
        * and skeletonizes large function bodies by masking them with a CCR token.
        */
-      static compress(prompt, disableCodeCompression = false) {
+      static compress(prompt, disableCodeCompression = false, optOutReason = null, metrics) {
+        const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
+        const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
+        let totalDetected = 0;
+        const matchesMd = [...prompt.matchAll(mdBlockRegex)];
+        const matchesXml = [...prompt.matchAll(xmlBlockRegex)];
+        totalDetected = matchesMd.length + matchesXml.length;
+        if (metrics) {
+          metrics.code.regexTotalDetected += totalDetected;
+        }
         if (disableCodeCompression) {
+          if (metrics && totalDetected > 0) {
+            if (optOutReason === "system_guard")
+              metrics.code.fallbackOptOutSystemGuard += totalDetected;
+            else
+              metrics.code.fallbackOptOutUserConfig += totalDetected;
+          }
           return { optimizedText: prompt, cachedContents: [] };
         }
         const cachedContents = [];
-        const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
-        const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
           try {
             const sparsified = this.sparsifyCode(code, lang, cachedContents);
+            if (metrics)
+              metrics.code.successfullyOptimized++;
             return `\`\`\`${lang}
 ${sparsified}
 \`\`\``;
           } catch (e) {
+            if (metrics) {
+              metrics.code.fallbackParseFailure++;
+              metrics.sampledFailures.push({ type: "parse_failure", reason: e.message || "Tree-sitter error", snippet: code.substring(0, 200) });
+            }
             return match;
           }
         });
         optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
           try {
             const sparsified = this.sparsifyCode(code, ext, cachedContents);
+            if (metrics)
+              metrics.code.successfullyOptimized++;
             return match.replace(code, `
 ${sparsified}
 `);
           } catch (e) {
+            if (metrics) {
+              metrics.code.fallbackParseFailure++;
+              metrics.sampledFailures.push({ type: "parse_failure", reason: e.message || "Tree-sitter error", snippet: code.substring(0, 200) });
+            }
             return match;
           }
         });
@@ -39349,8 +39374,13 @@ var require_dist11 = __commonJS({
       { pattern: /thank you so much/gi, replacement: "" },
       { pattern: /kindly help me with/gi, replacement: "resolve" }
     ];
-    function minifyJsonBlocks(text) {
+    function minifyJsonBlocks(text, metrics) {
       const cachedContents = [];
+      if (metrics) {
+        const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/ig;
+        const matches = [...text.matchAll(jsonBlockRegex)];
+        metrics.json.regexTotalDetected += matches.length;
+      }
       const minified = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
         try {
           const parsed = JSON.parse(jsonString);
@@ -39389,10 +39419,16 @@ var require_dist11 = __commonJS({
             }
             return obj;
           };
+          if (metrics)
+            metrics.json.successfullyOptimized++;
           return `\`\`\`json
 ${JSON.stringify(walk(parsed), null, 2)}
 \`\`\``;
-        } catch {
+        } catch (e) {
+          if (metrics) {
+            metrics.json.fallbackParseFailure++;
+            metrics.sampledFailures.push({ type: "parse_failure", reason: e.message || "JSON Parse Error", snippet: match.substring(0, 200) });
+          }
           return match;
         }
       });
@@ -39416,16 +39452,61 @@ ${JSON.stringify(walk(parsed), null, 2)}
       }
       return output.join("\n\n");
     }
+    var _magikaInstance = null;
+    async function getMagika() {
+      if (!_magikaInstance) {
+        try {
+          const magikaModule = require("magika/node");
+          const Magika = magikaModule.MagikaNode || magikaModule.Magika;
+          if (Magika && typeof Magika.create === "function") {
+            _magikaInstance = await Magika.create();
+          } else if (Magika) {
+            const inst = new Magika();
+            await inst.load();
+            _magikaInstance = inst;
+          }
+        } catch (e) {
+        }
+      }
+      return _magikaInstance;
+    }
     var PromptOptimizer = class {
-      optimize(prompt, model, options) {
+      async optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
-        const jsonResult = minifyJsonBlocks(prompt);
+        const coverage = {
+          json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
+          code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
+          sampledFailures: []
+        };
+        if (prompt.length > 50) {
+          const magika = await getMagika();
+          if (magika) {
+            try {
+              const bytes = new TextEncoder().encode(prompt.substring(0, 4e3));
+              const prediction = await magika.identifyBytes(bytes);
+              const label = prediction?.label || prediction;
+              if (label === "json" || label === "jsonl") {
+                coverage.json.magikaDetected = 1;
+              } else if (["python", "javascript", "typescript", "go", "rust", "cpp", "java"].includes(label)) {
+                coverage.code.magikaDetected = 1;
+              }
+            } catch (e) {
+            }
+          }
+        }
+        const jsonResult = minifyJsonBlocks(prompt, coverage);
         let optimized = jsonResult.text;
         allCachedContents.push(...jsonResult.cachedContents);
-        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression);
+        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
         optimized = codeResult.optimizedText;
         allCachedContents.push(...codeResult.cachedContents);
+        if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
+          coverage.sampledFailures.push({ type: "magika_mismatch", reason: "Magika detected code, but regex found no fence", snippet: prompt.substring(0, 200) });
+        }
+        if (coverage.json.magikaDetected > 0 && coverage.json.regexTotalDetected === 0) {
+          coverage.sampledFailures.push({ type: "magika_mismatch", reason: "Magika detected JSON, but regex found no fence", snippet: prompt.substring(0, 200) });
+        }
         optimized = deduplicateContext(optimized);
         for (const item of CONVERSATIONAL_FILLERS) {
           optimized = optimized.replace(item.pattern, item.replacement);
@@ -39439,7 +39520,8 @@ ${JSON.stringify(walk(parsed), null, 2)}
           optimizedText: optimized,
           tokensSaved,
           savingsPercent,
-          cachedContents: allCachedContents
+          cachedContents: allCachedContents,
+          coverage
         };
       }
     };
@@ -49829,7 +49911,32 @@ var require_dist16 = __commonJS({
       const targetUrl = `${baseUrl}${modelUrl}`;
       return handleInterception("gemini", targetUrl, request, reply);
     });
-    function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression, outCachedContents = []) {
+    function aggregateCoverage(target, source) {
+      if (!source)
+        return;
+      if (!target.json) {
+        target.json = { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 };
+        target.code = { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 };
+        target.sampledFailures = [];
+      }
+      target.json.magikaDetected += source.json.magikaDetected;
+      target.json.regexTotalDetected += source.json.regexTotalDetected;
+      target.json.successfullyOptimized += source.json.successfullyOptimized;
+      target.json.fallbackParseFailure += source.json.fallbackParseFailure;
+      target.code.magikaDetected += source.code.magikaDetected;
+      target.code.regexTotalDetected += source.code.regexTotalDetected;
+      target.code.successfullyOptimized += source.code.successfullyOptimized;
+      target.code.fallbackParseFailure += source.code.fallbackParseFailure;
+      target.code.fallbackOptOutSystemGuard += source.code.fallbackOptOutSystemGuard;
+      target.code.fallbackOptOutUserConfig += source.code.fallbackOptOutUserConfig;
+      if (source.sampledFailures && source.sampledFailures.length > 0) {
+        target.sampledFailures.push(...source.sampledFailures);
+        if (target.sampledFailures.length > 20) {
+          target.sampledFailures = target.sampledFailures.slice(-20);
+        }
+      }
+    }
+    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -49841,10 +49948,13 @@ var require_dist16 = __commonJS({
         let newText = cleanMsg.content;
         try {
           if (cleanMsg.role === "user" || cleanMsg.role === "system") {
-            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? "system_guard" : null });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
+            }
+            if (opt.coverage && outCoverageMetrics) {
+              aggregateCoverage(outCoverageMetrics, opt.coverage);
             }
           } else if (cleanMsg.role === "tool") {
             newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
@@ -49901,7 +50011,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression, outCachedContents = []) {
+    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -49913,10 +50023,13 @@ var require_dist16 = __commonJS({
         let newText = cleanMsg.content;
         if (cleanMsg.role === "user" || cleanMsg.role === "system") {
           try {
-            const opt = promptOptimizer.optimize(newText, model, { disableCodeCompression });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? "system_guard" : null });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
+            }
+            if (opt.coverage && outCoverageMetrics) {
+              aggregateCoverage(outCoverageMetrics, opt.coverage);
             }
           } catch (e) {
             console.error("[TokenWall Gateway] Gemini message optimization failed, falling open:", e.message);
@@ -50457,11 +50570,15 @@ ${steeringMsg}`;
       const estimation = (0, estimators_1.calculatePreFlightEstimation)(parsedRequest);
       const config = configManager2.getConfig();
       const isKillSwitchActive = process.env.TOKENWALL_KILL_SWITCH === "true";
-      let contextReport = { inefficiencies: [], cleanMessages: parsedRequest.messages };
+      let contextReport = { inefficiencies: [], cleanMessages: parsedRequest.messages, cachedContents: [], coverage: {} };
       let routingOptions = { shouldRoute: false, alternatives: [] };
       if (!isKillSwitchActive) {
         try {
           contextReport = await contextAnalyzer.analyze(parsedRequest, config);
+          if (!contextReport.cachedContents)
+            contextReport.cachedContents = [];
+          if (!contextReport.coverage)
+            contextReport.coverage = {};
         } catch (err) {
           console.error("[TokenWall Gateway] ContextAnalyzer failed, falling open:", err.message);
           telemetryLogger.emitEvent({ eventType: "pipeline_error", sessionId, requestId, metadata: { stage: "ContextAnalyzer", error: err.message } });
@@ -50570,7 +50687,7 @@ ${runningTotal.toLocaleString()}`);
       let optimization = void 0;
       if (!isKillSwitchActive) {
         try {
-          optimization = lastUserMsg ? promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools }) : void 0;
+          optimization = lastUserMsg ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools }) : void 0;
         } catch (err) {
           console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
         }
@@ -50718,47 +50835,47 @@ ${runningTotal.toLocaleString()}`);
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
+            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
-              const opt = promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools });
+              const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
               finalRequestBody.system = opt.optimizedText;
               if (opt.cachedContents)
                 contextReport.cachedContents.push(...opt.cachedContents);
+              if (opt.coverage)
+                aggregateCoverage(contextReport.coverage, opt.coverage);
             } else if (Array.isArray(finalRequestBody.system)) {
-              finalRequestBody.system = finalRequestBody.system.map((block) => {
+              for (let i = 0; i < finalRequestBody.system.length; i++) {
+                const block = finalRequestBody.system[i];
                 if (block && block.type === "text" && typeof block.text === "string") {
-                  const opt = promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+                  const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
                   if (opt.cachedContents)
                     contextReport.cachedContents.push(...opt.cachedContents);
-                  return {
-                    ...block,
-                    text: opt.optimizedText
-                  };
+                  if (opt.coverage)
+                    aggregateCoverage(contextReport.coverage, opt.coverage);
+                  finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
                 }
-                return block;
-              });
+              }
             }
           }
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents)
+            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
           };
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
-            finalRequestBody.systemInstruction.parts = finalRequestBody.systemInstruction.parts.map((part) => {
+            for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
+              const part = finalRequestBody.systemInstruction.parts[i];
               if (part && typeof part.text === "string") {
-                const opt = promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools });
+                const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
                 if (opt.cachedContents)
                   contextReport.cachedContents.push(...opt.cachedContents);
-                return {
-                  ...part,
-                  text: opt.optimizedText
-                };
+                if (opt.coverage)
+                  aggregateCoverage(contextReport.coverage, opt.coverage);
+                finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
               }
-              return part;
-            });
+            }
           }
         }
         finalRequest = { ...parsedRequest, messages: cleanMsgs };
@@ -50786,6 +50903,16 @@ ${runningTotal.toLocaleString()}`);
           amount: savingsAmount,
           tokens: savedTokens
         });
+        if (contextReport.coverage) {
+          telemetryLogger.emitEvent({
+            eventType: "optimization_coverage",
+            sessionId,
+            requestId,
+            metadata: {
+              coverage: contextReport.coverage
+            }
+          });
+        }
         try {
           const logDir = path_1.default.join(os_1.default.homedir(), ".tokenwall", "logs");
           if (!fs_1.default.existsSync(logDir))

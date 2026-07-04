@@ -62,8 +62,13 @@ const CONVERSATIONAL_FILLERS = [
     { pattern: /thank you so much/gi, replacement: '' },
     { pattern: /kindly help me with/gi, replacement: 'resolve' }
 ];
-function minifyJsonBlocks(text) {
+function minifyJsonBlocks(text, metrics) {
     const cachedContents = [];
+    if (metrics) {
+        const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/ig;
+        const matches = [...text.matchAll(jsonBlockRegex)];
+        metrics.json.regexTotalDetected += matches.length;
+    }
     const minified = text.replace(/```json\s*([\s\S]*?)\s*```/ig, (match, jsonString) => {
         try {
             const parsed = JSON.parse(jsonString);
@@ -107,9 +112,15 @@ function minifyJsonBlocks(text) {
                 return obj;
             };
             // JSON.stringify inherently removes all redundant whitespace
+            if (metrics)
+                metrics.json.successfullyOptimized++;
             return `\`\`\`json\n${JSON.stringify(walk(parsed), null, 2)}\n\`\`\``;
         }
-        catch {
+        catch (e) {
+            if (metrics) {
+                metrics.json.fallbackParseFailure++;
+                metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'JSON Parse Error', snippet: match.substring(0, 200) });
+            }
             return match;
         }
     });
@@ -148,18 +159,68 @@ function deduplicateContext(text) {
     }
     return output.join('\n\n');
 }
+let _magikaInstance = null;
+async function getMagika() {
+    if (!_magikaInstance) {
+        try {
+            const magikaModule = require('magika/node');
+            const Magika = magikaModule.MagikaNode || magikaModule.Magika;
+            if (Magika && typeof Magika.create === 'function') {
+                _magikaInstance = await Magika.create();
+            }
+            else if (Magika) {
+                const inst = new Magika();
+                await inst.load();
+                _magikaInstance = inst;
+            }
+        }
+        catch (e) {
+            // Magika not available
+        }
+    }
+    return _magikaInstance;
+}
 class PromptOptimizer {
-    optimize(prompt, model, options) {
+    async optimize(prompt, model, options) {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
+        const coverage = {
+            json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
+            code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
+            sampledFailures: []
+        };
+        // Magika independent baseline
+        if (prompt.length > 50) {
+            const magika = await getMagika();
+            if (magika) {
+                try {
+                    const bytes = new TextEncoder().encode(prompt.substring(0, 4000));
+                    const prediction = await magika.identifyBytes(bytes);
+                    const label = prediction?.label || prediction;
+                    if (label === 'json' || label === 'jsonl') {
+                        coverage.json.magikaDetected = 1;
+                    }
+                    else if (['python', 'javascript', 'typescript', 'go', 'rust', 'cpp', 'java'].includes(label)) {
+                        coverage.code.magikaDetected = 1;
+                    }
+                }
+                catch (e) { }
+            }
+        }
         // First apply JSON minification
-        const jsonResult = minifyJsonBlocks(prompt);
+        const jsonResult = minifyJsonBlocks(prompt, coverage);
         let optimized = jsonResult.text;
         allCachedContents.push(...jsonResult.cachedContents);
         // Apply AST-based Skeletonization and Sparsification
-        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression);
+        const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
         optimized = codeResult.optimizedText;
         allCachedContents.push(...codeResult.cachedContents);
+        if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
+            coverage.sampledFailures.push({ type: 'magika_mismatch', reason: 'Magika detected code, but regex found no fence', snippet: prompt.substring(0, 200) });
+        }
+        if (coverage.json.magikaDetected > 0 && coverage.json.regexTotalDetected === 0) {
+            coverage.sampledFailures.push({ type: 'magika_mismatch', reason: 'Magika detected JSON, but regex found no fence', snippet: prompt.substring(0, 200) });
+        }
         // Apply Context Deduplication
         optimized = deduplicateContext(optimized);
         // Apply filler regexes
@@ -178,7 +239,8 @@ class PromptOptimizer {
             optimizedText: optimized,
             tokensSaved,
             savingsPercent,
-            cachedContents: allCachedContents
+            cachedContents: allCachedContents,
+            coverage
         };
     }
 }

@@ -11,6 +11,8 @@ tsParser.setLanguage(TypeScript.typescript);
 const tsxParser = new Parser();
 tsxParser.setLanguage(TypeScript.tsx);
 
+import type { CoverageMetrics } from './index';
+
 export interface CachedContent {
   id: string;
   content: string;
@@ -22,24 +24,46 @@ export class CodeCompressor {
    * parses them into an AST using Tree-sitter, strips only actual comment nodes,
    * and skeletonizes large function bodies by masking them with a CCR token.
    */
-  static compress(prompt: string, disableCodeCompression: boolean = false): { optimizedText: string, cachedContents: CachedContent[] } {
+  static compress(
+    prompt: string, 
+    disableCodeCompression: boolean = false,
+    optOutReason: 'system_guard' | 'user_config' | null = null,
+    metrics?: CoverageMetrics
+  ): { optimizedText: string, cachedContents: CachedContent[] } {
+    
+    // Count regex total detected
+    const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
+    const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
+    
+    let totalDetected = 0;
+    const matchesMd = [...prompt.matchAll(mdBlockRegex)];
+    const matchesXml = [...prompt.matchAll(xmlBlockRegex)];
+    totalDetected = matchesMd.length + matchesXml.length;
+    
+    if (metrics) {
+      metrics.code.regexTotalDetected += totalDetected;
+    }
+
     if (disableCodeCompression) {
+      if (metrics && totalDetected > 0) {
+        if (optOutReason === 'system_guard') metrics.code.fallbackOptOutSystemGuard += totalDetected;
+        else metrics.code.fallbackOptOutUserConfig += totalDetected;
+      }
       return { optimizedText: prompt, cachedContents: [] };
     }
 
     const cachedContents: CachedContent[] = [];
 
-    // Match Markdown code blocks (```javascript, ```js, ```typescript, ```ts)
-    const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
-    
-    // Match XML file_content blocks with .js, .ts, .jsx, .tsx extensions
-    const xmlBlockRegex = /<file_content[^>]*path="[^"]+\.(js|ts|jsx|tsx)"[^>]*>\s*([\s\S]*?)\s*<\/file_content>/gi;
-
     let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
       try {
         const sparsified = this.sparsifyCode(code, lang, cachedContents);
+        if (metrics) metrics.code.successfullyOptimized++;
         return `\`\`\`${lang}\n${sparsified}\n\`\`\``;
-      } catch (e) {
+      } catch (e: any) {
+        if (metrics) {
+          metrics.code.fallbackParseFailure++;
+          metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
+        }
         // Fallback to original if parsing fails
         return match;
       }
@@ -48,9 +72,14 @@ export class CodeCompressor {
     optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
       try {
         const sparsified = this.sparsifyCode(code, ext, cachedContents);
+        if (metrics) metrics.code.successfullyOptimized++;
         // Replace only the inner code content, keep the XML tags intact
         return match.replace(code, `\n${sparsified}\n`);
-      } catch (e) {
+      } catch (e: any) {
+        if (metrics) {
+          metrics.code.fallbackParseFailure++;
+          metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
+        }
         return match;
       }
     });

@@ -1,3 +1,4 @@
+import type { CoverageMetrics } from './index';
 export interface CachedContent {
     id: string;
     content: string;
@@ -8,7 +9,7 @@ export declare class CodeCompressor {
      * parses them into an AST using Tree-sitter, strips only actual comment nodes,
      * and skeletonizes large function bodies by masking them with a CCR token.
      */
-    static compress(prompt: string, disableCodeCompression?: boolean): {
+    static compress(prompt: string, disableCodeCompression?: boolean, optOutReason?: 'system_guard' | 'user_config' | null, metrics?: CoverageMetrics): {
         optimizedText: string;
         cachedContents: CachedContent[];
     };

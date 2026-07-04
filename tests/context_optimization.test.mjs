@@ -213,7 +213,7 @@ function doComplexWork() {
 `;
   
   // Test 1: Normal optimization (should trigger CCR JSON truncation and Code Skeletonization)
-  const result1 = optimizer.optimize(testPayload, 'gpt-4');
+  const result1 = await optimizer.optimize(testPayload, 'gpt-4');
   const optimized = result1.optimizedText;
   
   assert.ok(optimized.includes(longHex), "Hex ID should bypass truncation");
@@ -229,7 +229,7 @@ function doComplexWork() {
   assert.ok(result1.cachedContents.some((c) => c.id.startsWith('ccr_sk_')), "Has cached sk content");
 
   // Test 2: Disable Code Compression (simulate active edit tools)
-  const result2 = optimizer.optimize(testPayload, 'gpt-4', { disableCodeCompression: true });
+  const result2 = await optimizer.optimize(testPayload, 'gpt-4', { disableCodeCompression: true });
   assert.ok(!result2.optimizedText.includes('ccr_sk_'), "Code compression should be skipped");
   assert.ok(result2.optimizedText.includes('const k = 11;'), "Original code body should be preserved when compression disabled");
 
