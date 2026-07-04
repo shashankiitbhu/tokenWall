@@ -46,6 +46,7 @@ __exportStar(require("./importance"), exports);
 __exportStar(require("./query-analyzer"), exports);
 const query_analyzer_1 = require("./query-analyzer");
 const importance_1 = require("./importance");
+const lost_in_middle_1 = require("./lost-in-middle");
 let _magikaInstance = null;
 async function getMagika() {
     if (!_magikaInstance) {
@@ -218,7 +219,7 @@ class ContextAnalyzer {
                 if (state && state.content === fileContent) {
                     replacement = format === 'xml'
                         ? `<file_content path="${filePath}">\n[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]\n</file_content>`
-                        : `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
+                        : `File: ${filePath}\n[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
                     const beforeTokens = (0, estimators_1.countTokens)(fullMatch, req.model);
                     const afterTokens = (0, estimators_1.countTokens)(replacement, req.model);
                     const saved = Math.max(0, beforeTokens - afterTokens);
@@ -242,7 +243,7 @@ class ContextAnalyzer {
                         const patch = Diff.createPatch(filePath, state.content, fileContent, '', '', { context: 1 });
                         replacement = format === 'xml'
                             ? `<file_content path="${filePath}">\n[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\`\n</file_content>`
-                            : `[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\``;
+                            : `File: ${filePath}\n[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\``;
                         const beforeTokens = (0, estimators_1.countTokens)(fullMatch, req.model);
                         const diffTokens = (0, estimators_1.countTokens)(replacement, req.model);
                         if (diffTokens < beforeTokens) {
@@ -280,6 +281,14 @@ class ContextAnalyzer {
             }
             while ((match = xmlFileBlockRegex.exec(content)) !== null) {
                 processFileBlock(match[0], match[1], match[2], xmlFileBlockRegex, 'xml');
+            }
+            // 0.6 Lost-in-the-Middle Mitigation (U-shaped Reordering)
+            if (effectiveConfig.lostInMiddleMitigation !== false) {
+                content = lost_in_middle_1.LostInMiddleMitigator.reorder(content, {
+                    currentTurnText: i === cleanMessages.length - 1 ? msg.content : cleanMessages[cleanMessages.length - 1].content,
+                    fileShadowState,
+                    model: req.model
+                });
             }
             // 1. Lockfiles detection
             const lockfileMatch = content.match(/(?:File|path|Filename|attachment):\s*([a-zA-Z0-9_\-\.\/]*lock\.[a-z]+|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)/gi);

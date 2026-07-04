@@ -1,0 +1,19 @@
+{
+  "name": "Lost in the Middle Mitigation",
+  "request": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a senior developer. Answer questions about the codebase."
+      },
+      {
+        "role": "user",
+        "content": "Where is the authentication bug happening?\n\n<file_content path=\"irrelevant1.js\">\nconst a = 1;\n</file_content>\n\n<file_content path=\"irrelevant2.js\">\nconst b = 2;\n</file_content>\n\n<file_content path=\"irrelevant3.js\">\nconst c = 3;\n</file_content>\n\n<file_content path=\"irrelevant4.js\">\nconst d = 4;\n</file_content>\n\n<file_content path=\"irrelevant5.js\">\nconst e = 5;\n</file_content>\n\n<file_content path=\"auth.js\">\nfunction authenticate() {\n  // Error: Authentication failed because token is undefined at line 42\n  throw new Error(\"Token is undefined\");\n}\n</file_content>\n\n<file_content path=\"irrelevant6.js\">\nconst f = 6;\n</file_content>\n\n<file_content path=\"irrelevant7.js\">\nconst g = 7;\n</file_content>\n\n<file_content path=\"irrelevant8.js\">\nconst h = 8;\n</file_content>\n\n<file_content path=\"irrelevant9.js\">\nconst i = 9;\n</file_content>\n\n<file_content path=\"irrelevant10.js\">\nconst j = 10;\n</file_content>"
+      }
+    ]
+  },
+  "success_criteria": "The model should identify that the authentication bug is happening in auth.js at line 42 because the token is undefined, or just mention auth.js."
+}

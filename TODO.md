@@ -35,7 +35,7 @@
 - `[ ]` **Privacy/data-handling statement + local-only mode**
 
 ## 2. Medium Priority
-- `[ ]` **Lost-in-the-middle mitigation**
+- `[x]` **Lost-in-the-middle mitigation**
 - `[ ]` **Template diffing**
 - `[ ]` **Hierarchical summarization**
 - `[ ]` **AST-aware chunking (full function/class-boundary chunking)**

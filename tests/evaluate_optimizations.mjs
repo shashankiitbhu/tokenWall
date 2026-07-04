@@ -315,6 +315,68 @@ Here is some unstructured JSON payload:
   ]
 };
 
+const endToEndMockReq = {
+  model: 'claude-opus-4-8',
+  messages: [
+    {
+      role: 'system',
+      content: agentSystemPrompt
+    },
+    {
+      role: 'user',
+      content: conversationalBoilerplate + '\n\n' + `Here is my project data:
+<file_content path="package-lock.json">
+{
+  "name": "huge-project",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "node_modules/lodash": { "version": "4.17.21" },
+    "node_modules/react": { "version": "18.2.0" }
+    ${',"node_modules/foo": { "version": "1.0.0" }'.repeat(500)}
+  }
+}
+</file_content>
+
+<file_content path="src/auth.ts">
+/**
+ * Main authentication service
+ */
+export class AuthService {
+  async login(user: string) {
+    /* 
+     * Long boilerplate comments here ...
+     */
+    ${'console.log("Checking user...");\\n    '.repeat(100)}
+    throw new Error("NullPointerException in AuthService");
+  }
+}
+</file_content>
+
+<file_content path="src/irrelevant1.ts">
+export const A = 1;
+</file_content>
+
+<file_content path="src/irrelevant2.ts">
+export const B = 2;
+</file_content>
+
+<file_content path="src/irrelevant3.ts">
+export const C = 3;
+</file_content>
+`
+    },
+    {
+      role: 'assistant',
+      content: 'I need to check the logs.'
+    },
+    {
+      role: 'user',
+      content: deduplicationMockData
+    }
+  ]
+};
+
 // --- BENCHMARK EXECUTION ---
 
 async function runBenchmark() {
@@ -519,6 +581,35 @@ async function runBenchmark() {
       afterText: result.cleanMessages[1].content,
       beforeTokens: countTokens(queryAwareReq.messages[1].content, model),
       afterTokens: countTokens(result.cleanMessages[1].content, model),
+      latencyMs: parseFloat(latency.toFixed(2))
+    });
+  }
+
+  // Case 10: End-to-End Realistic Tool Call Workflow
+  {
+    const analyzer = new ContextAnalyzer();
+    
+    const beforeTokens = endToEndMockReq.messages.reduce((sum, msg) => sum + countTokens(msg.content, model), 0);
+    
+    const start = performance.now();
+    const report = await analyzer.analyze(endToEndMockReq, { lostInMiddleMitigation: true });
+    
+    const finalMessages = report.cleanMessages.map(msg => {
+      const optRes = optimizer.optimize(msg.content, model);
+      return { ...msg, content: optRes.optimizedText };
+    });
+    const latency = performance.now() - start;
+
+    const afterTokens = finalMessages.reduce((sum, msg) => sum + countTokens(msg.content, model), 0);
+    
+    results.push({
+      id: 'end_to_end_workflow',
+      name: 'End-to-End Pipeline (Analyzer + Optimizer)',
+      description: 'Simulates a real-world multi-turn payload involving boilerplate, system prompts, large lockfiles, AST compression, deduplication, and U-shaped reordering.',
+      beforeText: 'Multi-turn payload...',
+      afterText: 'Fully optimized payload...',
+      beforeTokens: beforeTokens,
+      afterTokens: afterTokens,
       latencyMs: parseFloat(latency.toFixed(2))
     });
   }

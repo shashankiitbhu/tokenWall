@@ -18,6 +18,7 @@ TokenWall sits between your local development terminal and the upstream model AP
 - **Spend Firewall**: Protects against automated runaway loop spend via transactional reservations.
 - **Interactive Approvals**: Decoupled Control Plane websocket communication resolves TTY conflicts, allowing the agent to hold stdin while the developer approves costly calls in another terminal or dashboard window.
 - **Headless Mode**: Tailored policies for CI/CD environments (auto-approve small tasks, auto-deny large spikes, budget-aware routing).
+- **Lost-in-the-Middle Mitigation**: Prevents LLM attention degradation during large multi-file tool dumps. TokenWall scores incoming file blocks (using recency, diagnostic/error regex matching, file mentions, and size penalties) and deterministically applies a U-Shaped placement policy, forcing the most critical context directly to the extreme boundaries (index 0 and N-1) of the context window.
 - **Context Optimizer & Reversible Compression (CCR)**: Identifies and compresses token waste like lockfiles, node_modules references, logs, and binary payloads. Supports:
   - **ML-Based Content Detection (Magika)**: Integrates Google's Magika deep learning model to accurately detect raw/unstructured files (JSON, JS, Python, logs) dumped in messages without markdown fences, automatically routing them to the correct compressor.
   - **AST-Based Code Sparsification (Headroom-style)**: Utilizes the official TypeScript Compiler API to detect, parse, and heavily compress massive embedded JavaScript/TypeScript code blocks.
@@ -543,6 +544,17 @@ Configuration resides at:
   - KV Cache Hits: **95%+**
   - Average Latency: `0.4s` (first-token)
   - Cost Discount: **90% off input tokens on Anthropic** ($0.30/M instead of $3.00/M)
+
+### Example D: Multi-File Context Dumping (Lost-in-the-Middle Mitigation)
+* **Prompt**:
+  > "Where is the authentication bug happening? [Followed by 10 dumped files, where auth.js has a stack trace in the middle]"
+* **Before**:
+  - `auth.js` sits buried at index 5 out of 10.
+  - The model frequently hallucinates or fails to identify the root cause due to attention decay.
+* **After (U-Shaped Reordering)**:
+  - TokenWall detects the `Error:` diagnostic and explicit mentions.
+  - `auth.js` is hoisted to the extreme boundary (first or last file block) of the context window.
+  - Model successfully diagnoses the error with 100% reliability, without invalidating KV cache determinism.
 
 ---
 

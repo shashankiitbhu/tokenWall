@@ -12,6 +12,7 @@ export * from './query-analyzer';
 
 import { QueryAnalyzer } from './query-analyzer';
 import { ImportanceEngine } from './importance';
+import { LostInMiddleMitigator } from './lost-in-middle';
 
 export interface InefficiencyItem {
   type: 'lockfile' | 'node_modules' | 'binary' | 'minified' | 'logs' | 'duplicate' | 'json' | 'code' | 'volatile_prefix';
@@ -214,7 +215,7 @@ export class ContextAnalyzer {
         if (state && state.content === fileContent) {
           replacement = format === 'xml' 
             ? `<file_content path="${filePath}">\n[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]\n</file_content>`
-            : `[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
+            : `File: ${filePath}\n[TokenWall: File identical to earlier occurrence. Refer to the chat history above for ${filePath}]`;
           
           const beforeTokens = countTokens(fullMatch, req.model);
           const afterTokens = countTokens(replacement, req.model);
@@ -239,7 +240,7 @@ export class ContextAnalyzer {
             const patch = Diff.createPatch(filePath, state.content, fileContent, '', '', { context: 1 });
             replacement = format === 'xml'
               ? `<file_content path="${filePath}">\n[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\`\n</file_content>`
-              : `[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\``;
+              : `File: ${filePath}\n[TokenWall: File updated. Unified Diff from previous occurrence in chat history:]\n\`\`\`diff\n${patch}\`\`\``;
             
             const beforeTokens = countTokens(fullMatch, req.model);
             const diffTokens = countTokens(replacement, req.model);
@@ -277,6 +278,15 @@ export class ContextAnalyzer {
       }
       while ((match = xmlFileBlockRegex.exec(content)) !== null) {
         processFileBlock(match[0], match[1], match[2], xmlFileBlockRegex, 'xml');
+      }
+
+      // 0.6 Lost-in-the-Middle Mitigation (U-shaped Reordering)
+      if (effectiveConfig.lostInMiddleMitigation !== false) {
+        content = LostInMiddleMitigator.reorder(content, {
+          currentTurnText: i === cleanMessages.length - 1 ? msg.content : cleanMessages[cleanMessages.length - 1].content,
+          fileShadowState,
+          model: req.model
+        });
       }
 
       // 1. Lockfiles detection
