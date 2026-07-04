@@ -863,9 +863,17 @@ async function handleInterception(
     }
   }
   
+  // We need hasEditTools early for attribution missed opportunities
+  const hasEditTools = request.body.tools && request.body.tools.some((t: any) => 
+    ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name)
+  );
+  
+  let attribution: any = null;
+  let categorySavings: Record<string, number> = {};
+
   try {
-    const attribution = TokenAttributionAnalyzer.analyze(parsedRequest);
-    const categorySavings: Record<string, number> = {
+    attribution = TokenAttributionAnalyzer.analyze(parsedRequest);
+    categorySavings = {
       'JSON crushing': 0,
       'Log pruning': 0,
       'Tool pruning': 0,
@@ -880,36 +888,68 @@ async function handleInterception(
       else if (ineff.type === 'code') categorySavings['Code compression'] += ineff.approximateTokens;
     }
 
-    console.log('\n--- TOKEN ATTRIBUTION REPORT ---');
-    console.log('Incoming prompt');
-    console.log(`Total: ${attribution.totalTokens.toLocaleString()} tokens`);
-    console.log('\nBreakdown');
+    telemetryLogger.emitEvent({
+      eventType: 'attribution_calculated',
+      sessionId,
+      requestId,
+      metadata: { 
+        attribution, 
+        categorySavings, 
+        clientHeader: request.headers['x-tokenwall-client'] || request.headers['user-agent'] || 'unknown'
+      }
+    });
+
+    console.log('\n--- ADVANCED TOKEN ATTRIBUTION REPORT ---');
+    console.log('Composition');
     
     const pct = (val: number) => ((val / (attribution.totalTokens || 1)) * 100).toFixed(0).padStart(2, ' ');
-    console.log(`Source code               ${pct(attribution.sourceCodeTokens)}%`);
-    console.log(`Logs                      ${pct(attribution.logsTokens)}%`);
-    console.log(`Tool schemas              ${pct(attribution.toolSchemasTokens)}%`);
-    console.log(`JSON payloads             ${pct(attribution.jsonPayloadsTokens)}%`);
-    console.log(`Conversation              ${pct(attribution.conversationTokens)}%`);
-    console.log(`System prompt             ${pct(attribution.systemPromptTokens)}%`);
+    console.log(`Source code               ${attribution.sourceCodeTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.sourceCodeTokens)}%)`);
+    console.log(`Logs                      ${attribution.logsTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.logsTokens)}%)`);
+    console.log(`Tool schemas              ${attribution.toolSchemasTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.toolSchemasTokens)}%)`);
+    console.log(`JSON payloads             ${attribution.jsonPayloadsTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.jsonPayloadsTokens)}%)`);
+    console.log(`Conversation              ${attribution.conversationTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.conversationTokens)}%)`);
+    console.log(`System prompt             ${attribution.systemPromptTokens.toLocaleString().padStart(6, ' ')} tokens (${pct(attribution.systemPromptTokens)}%)`);
     
-    console.log('\nOptimizations');
+    console.log('\nSankey Pipeline');
+    let runningTotal = attribution.totalTokens;
+    console.log(`Incoming\n${runningTotal.toLocaleString()}\n↓`);
+    
     let hasOpts = false;
-    for (const [name, saved] of Object.entries(categorySavings)) {
+    // Sort optimizations by tokens saved
+    const sortedOpts = Object.entries(categorySavings).sort((a, b) => b[1] - a[1]);
+    for (const [name, saved] of sortedOpts) {
       if (saved > 0) {
-         console.log(`${name.padEnd(18)} -${saved.toLocaleString()} tokens`);
+         runningTotal -= saved;
+         const roiPct = ((saved / (attribution.totalTokens || 1)) * 100);
+         const stars = roiPct >= 15 ? '★★★★★' : roiPct >= 10 ? '★★★★☆' : roiPct >= 5 ? '★★★☆☆' : roiPct >= 2 ? '★★☆☆☆' : '★☆☆☆☆';
+         console.log(`${name.padEnd(20)} -${saved.toLocaleString()} tokens (${stars})\n${runningTotal.toLocaleString()}\n↓`);
          hasOpts = true;
       }
     }
-    if (!hasOpts) console.log('None.');
     
-    console.log('\nRemaining');
+    if (!hasOpts) {
+      console.log('No optimizers triggered.\n↓');
+    }
+    console.log(`Output\n${runningTotal.toLocaleString()}`);
+    
+    console.log('\nLargest remaining opportunity:');
     const remain = [
-      { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']) },
-      { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']) },
-      { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']) },
+      { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: hasEditTools ? 'Write-path safety bypass' : null },
+      { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']), reason: null },
+      { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']), reason: null },
+      { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: 'Tool pruning currently inactive' },
+      { name: 'Conversation', count: Math.max(0, attribution.conversationTokens), reason: 'Agent intent preservation' }
     ].sort((a, b) => b.count - a.count);
-    console.log(`${remain[0].name.padEnd(18)} ${remain[0].count.toLocaleString()} tokens (largest remaining cost)`);
+    
+    const topOpportunity = remain[0];
+    console.log(topOpportunity.name);
+    console.log(`${topOpportunity.count.toLocaleString()} tokens`);
+    console.log(`Optimizable          ${topOpportunity.reason ? 'NO' : 'YES'}`);
+    if (topOpportunity.reason) {
+      console.log(`Reason               ${topOpportunity.reason}`);
+    } else {
+      console.log(`Potential savings    ~50%`);
+    }
     console.log('--------------------------------\n');
   } catch (err: any) {
     console.error("[TokenWall Gateway] Attribution report failed:", err.message);
@@ -919,9 +959,6 @@ async function handleInterception(
   const userMessages = parsedRequest.messages.filter(m => m.role === 'user');
   const lastUserMsg = userMessages[userMessages.length - 1];
   
-  const hasEditTools = request.body.tools && request.body.tools.some((t: any) => 
-    ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name)
-  );
 
   // We apply prompt optimizer to ALL user messages in getOptimizedMessages later.
   // For telemetry/preview purposes, we just run it on the last user message to see if there's any immediate savings.
