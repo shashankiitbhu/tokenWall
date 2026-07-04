@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import { DBManager, ConfigManager, TokenWallConfig } from '@tokenwall/core';
 import { ProviderRegistry, NormalizedRequest, NormalizedResponse } from '@tokenwall/providers';
-import { calculatePreFlightEstimation, getPricingForModel, countTokens } from '@tokenwall/estimators';
+import { calculatePreFlightEstimation, getPricingForModel, countTokens, TokenAttributionAnalyzer } from '@tokenwall/estimators';
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
 import { ContextAnalyzer } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
@@ -861,6 +861,58 @@ async function handleInterception(
       console.error("[TokenWall Gateway] ModelRouter failed, falling open:", err.message);
       telemetryLogger.emitEvent({ eventType: 'pipeline_error', sessionId, requestId, metadata: { stage: 'ModelRouter', error: err.message } });
     }
+  }
+  
+  try {
+    const attribution = TokenAttributionAnalyzer.analyze(parsedRequest);
+    const categorySavings: Record<string, number> = {
+      'JSON crushing': 0,
+      'Log pruning': 0,
+      'Tool pruning': 0,
+      'Context deduplication': 0,
+      'Code compression': 0,
+    };
+
+    for (const ineff of contextReport.inefficiencies) {
+      if (ineff.type === 'lockfile' || ineff.type === 'json') categorySavings['JSON crushing'] += ineff.approximateTokens;
+      else if (ineff.type === 'logs') categorySavings['Log pruning'] += ineff.approximateTokens;
+      else if (ineff.type === 'duplicate') categorySavings['Context deduplication'] += ineff.approximateTokens;
+      else if (ineff.type === 'code') categorySavings['Code compression'] += ineff.approximateTokens;
+    }
+
+    console.log('\n--- TOKEN ATTRIBUTION REPORT ---');
+    console.log('Incoming prompt');
+    console.log(`Total: ${attribution.totalTokens.toLocaleString()} tokens`);
+    console.log('\nBreakdown');
+    
+    const pct = (val: number) => ((val / (attribution.totalTokens || 1)) * 100).toFixed(0).padStart(2, ' ');
+    console.log(`Source code               ${pct(attribution.sourceCodeTokens)}%`);
+    console.log(`Logs                      ${pct(attribution.logsTokens)}%`);
+    console.log(`Tool schemas              ${pct(attribution.toolSchemasTokens)}%`);
+    console.log(`JSON payloads             ${pct(attribution.jsonPayloadsTokens)}%`);
+    console.log(`Conversation              ${pct(attribution.conversationTokens)}%`);
+    console.log(`System prompt             ${pct(attribution.systemPromptTokens)}%`);
+    
+    console.log('\nOptimizations');
+    let hasOpts = false;
+    for (const [name, saved] of Object.entries(categorySavings)) {
+      if (saved > 0) {
+         console.log(`${name.padEnd(18)} -${saved.toLocaleString()} tokens`);
+         hasOpts = true;
+      }
+    }
+    if (!hasOpts) console.log('None.');
+    
+    console.log('\nRemaining');
+    const remain = [
+      { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']) },
+      { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']) },
+      { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']) },
+    ].sort((a, b) => b.count - a.count);
+    console.log(`${remain[0].name.padEnd(18)} ${remain[0].count.toLocaleString()} tokens (largest remaining cost)`);
+    console.log('--------------------------------\n');
+  } catch (err: any) {
+    console.error("[TokenWall Gateway] Attribution report failed:", err.message);
   }
   
   // Prompt Optimization (heuristic compression preview)
