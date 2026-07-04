@@ -39374,7 +39374,7 @@ var require_dist11 = __commonJS({
       { pattern: /thank you so much/gi, replacement: "" },
       { pattern: /kindly help me with/gi, replacement: "resolve" }
     ];
-    function minifyJsonBlocks(text, metrics) {
+    function minifyJsonBlocks(text, metrics, disableJsonMasking) {
       const cachedContents = [];
       if (metrics) {
         const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/ig;
@@ -39386,7 +39386,7 @@ var require_dist11 = __commonJS({
           const parsed = JSON.parse(jsonString);
           const walk = (obj) => {
             if (Array.isArray(obj)) {
-              if (obj.length > 50) {
+              if (obj.length > 50 && !disableJsonMasking) {
                 const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
                 cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
                 return [
@@ -39404,7 +39404,7 @@ var require_dist11 = __commonJS({
               }
               return newObj;
             } else if (typeof obj === "string") {
-              if (obj.length > 200) {
+              if (obj.length > 200 && !disableJsonMasking) {
                 const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(obj);
                 const isJWT = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(obj);
                 const isHex = /^[0-9a-fA-F]{32,}$/.test(obj);
@@ -39495,7 +39495,7 @@ ${JSON.stringify(walk(parsed), null, 2)}
             }
           }
         }
-        const jsonResult = minifyJsonBlocks(prompt, coverage);
+        const jsonResult = minifyJsonBlocks(prompt, coverage, options?.disableJsonMasking);
         let optimized = jsonResult.text;
         allCachedContents.push(...jsonResult.cachedContents);
         const codeResult = code_compressor_1.CodeCompressor.compress(optimized, options?.disableCodeCompression, options?.optOutReason || null, coverage);
@@ -49936,7 +49936,7 @@ var require_dist16 = __commonJS({
         }
       }
     }
-    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
+    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -49948,7 +49948,7 @@ var require_dist16 = __commonJS({
         let newText = cleanMsg.content;
         try {
           if (cleanMsg.role === "user" || cleanMsg.role === "system") {
-            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? "system_guard" : null });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
@@ -50011,7 +50011,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
+    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -50023,7 +50023,7 @@ var require_dist16 = __commonJS({
         let newText = cleanMsg.content;
         if (cleanMsg.role === "user" || cleanMsg.role === "system") {
           try {
-            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? "system_guard" : null });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
@@ -50687,7 +50687,7 @@ ${runningTotal.toLocaleString()}`);
       let optimization = void 0;
       if (!isKillSwitchActive) {
         try {
-          optimization = lastUserMsg ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools }) : void 0;
+          optimization = lastUserMsg ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null }) : void 0;
         } catch (err) {
           console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
         }
@@ -50839,7 +50839,7 @@ ${runningTotal.toLocaleString()}`);
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
-              const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+              const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
               finalRequestBody.system = opt.optimizedText;
               if (opt.cachedContents)
                 contextReport.cachedContents.push(...opt.cachedContents);
@@ -50849,7 +50849,7 @@ ${runningTotal.toLocaleString()}`);
               for (let i = 0; i < finalRequestBody.system.length; i++) {
                 const block = finalRequestBody.system[i];
                 if (block && block.type === "text" && typeof block.text === "string") {
-                  const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+                  const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
                   if (opt.cachedContents)
                     contextReport.cachedContents.push(...opt.cachedContents);
                   if (opt.coverage)
@@ -50868,7 +50868,7 @@ ${runningTotal.toLocaleString()}`);
             for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
               const part = finalRequestBody.systemInstruction.parts[i];
               if (part && typeof part.text === "string") {
-                const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
+                const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? "system_guard" : null });
                 if (opt.cachedContents)
                   contextReport.cachedContents.push(...opt.cachedContents);
                 if (opt.coverage)

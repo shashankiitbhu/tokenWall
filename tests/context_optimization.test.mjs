@@ -228,10 +228,20 @@ function doComplexWork() {
   assert.ok(result1.cachedContents.some((c) => c.id.startsWith('ccr_js_')), "Has cached js content");
   assert.ok(result1.cachedContents.some((c) => c.id.startsWith('ccr_sk_')), "Has cached sk content");
 
-  // Test 2: Disable Code Compression (simulate active edit tools)
+  // Test 2: Disable Code Compression (simulate active edit tools for code)
   const result2 = await optimizer.optimize(testPayload, 'gpt-4', { disableCodeCompression: true });
   assert.ok(!result2.optimizedText.includes('ccr_sk_'), "Code compression should be skipped");
   assert.ok(result2.optimizedText.includes('const k = 11;'), "Original code body should be preserved when compression disabled");
+
+  // Test 3: Disable JSON Masking (simulate active edit tools for JSON)
+  const result3 = await optimizer.optimize(testPayload, 'gpt-4', { disableJsonMasking: true });
+  assert.ok(!result3.optimizedText.includes('ccr_js_'), "JSON masking should be skipped");
+  assert.ok(result3.optimizedText.includes(longText), "Long text should be preserved when JSON masking is disabled");
+  
+  // Test 4: Disable both (gateway guard)
+  const result4 = await optimizer.optimize(testPayload, 'gpt-4', { disableCodeCompression: true, disableJsonMasking: true });
+  assert.ok(!result4.optimizedText.includes('ccr_sk_'), "Code compression should be skipped");
+  assert.ok(!result4.optimizedText.includes('ccr_js_'), "JSON masking should be skipped");
 
   console.log('PromptOptimizer CCR and Truncation works!');
 }

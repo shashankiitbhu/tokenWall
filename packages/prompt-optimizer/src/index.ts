@@ -35,6 +35,7 @@ export interface OptimizationResult {
 
 export interface PromptOptimizerOptions {
   disableCodeCompression?: boolean;
+  disableJsonMasking?: boolean;
   optOutReason?: 'system_guard' | 'user_config' | null;
 }
 
@@ -82,7 +83,7 @@ const CONVERSATIONAL_FILLERS = [
   { pattern: /thank you so much/gi, replacement: '' },
   { pattern: /kindly help me with/gi, replacement: 'resolve' }
 ];
-function minifyJsonBlocks(text: string, metrics?: CoverageMetrics): { text: string, cachedContents: CachedContent[] } {
+function minifyJsonBlocks(text: string, metrics?: CoverageMetrics, disableJsonMasking?: boolean): { text: string, cachedContents: CachedContent[] } {
   const cachedContents: CachedContent[] = [];
   
   if (metrics) {
@@ -97,7 +98,7 @@ function minifyJsonBlocks(text: string, metrics?: CoverageMetrics): { text: stri
       const walk = (obj: any): any => {
         if (Array.isArray(obj)) {
           // Array compression
-          if (obj.length > 50) {
+          if (obj.length > 50 && !disableJsonMasking) {
             const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
             cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
             return [
@@ -115,7 +116,7 @@ function minifyJsonBlocks(text: string, metrics?: CoverageMetrics): { text: stri
           }
           return newObj;
         } else if (typeof obj === 'string') {
-          if (obj.length > 200) {
+          if (obj.length > 200 && !disableJsonMasking) {
             // Check for high-entropy/structured ID shapes to bypass truncation
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(obj);
             const isJWT = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(obj);
@@ -233,7 +234,7 @@ export class PromptOptimizer {
     }
 
     // First apply JSON minification
-    const jsonResult = minifyJsonBlocks(prompt, coverage);
+    const jsonResult = minifyJsonBlocks(prompt, coverage, options?.disableJsonMasking);
     let optimized = jsonResult.text;
     allCachedContents.push(...jsonResult.cachedContents);
     

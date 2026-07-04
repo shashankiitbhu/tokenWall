@@ -31,6 +31,7 @@ export interface OptimizationResult {
 }
 export interface PromptOptimizerOptions {
     disableCodeCompression?: boolean;
+    disableJsonMasking?: boolean;
     optOutReason?: 'system_guard' | 'user_config' | null;
 }
 export declare class PromptOptimizer {

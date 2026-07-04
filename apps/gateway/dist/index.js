@@ -177,7 +177,7 @@ function aggregateCoverage(target, source) {
         }
     }
 }
-async function getOptimizedMessages(originalMessages, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
+async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
     if (!originalMessages)
         return originalMessages;
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -189,7 +189,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
         let newText = cleanMsg.content;
         try {
             if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
+                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
                 newText = opt.optimizedText;
                 if (opt.cachedContents) {
                     outCachedContents.push(...opt.cachedContents);
@@ -260,7 +260,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
     }
     return newMessages;
 }
-async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableCodeCompression, outCachedContents = [], outCoverageMetrics = null) {
+async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null) {
     if (!originalContents)
         return originalContents;
     const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -272,7 +272,7 @@ async function getOptimizedGeminiContents(originalContents, cleanMessages, model
         let newText = cleanMsg.content;
         if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
             try {
-                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
+                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
                 newText = opt.optimizedText;
                 if (opt.cachedContents) {
                     outCachedContents.push(...opt.cachedContents);
@@ -983,7 +983,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
     if (!isKillSwitchActive) {
         try {
             optimization = lastUserMsg
-                ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
+                ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null })
                 : undefined;
         }
         catch (err) {
@@ -1157,7 +1157,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
             // Optimize top-level Anthropic system prompt
             if (provider === 'anthropic' && finalRequestBody.system) {
                 if (typeof finalRequestBody.system === 'string') {
-                    const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                    const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
                     finalRequestBody.system = opt.optimizedText;
                     if (opt.cachedContents)
                         contextReport.cachedContents.push(...opt.cachedContents);
@@ -1168,7 +1168,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
                     for (let i = 0; i < finalRequestBody.system.length; i++) {
                         const block = finalRequestBody.system[i];
                         if (block && block.type === 'text' && typeof block.text === 'string') {
-                            const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                            const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
                             if (opt.cachedContents)
                                 contextReport.cachedContents.push(...opt.cachedContents);
                             if (opt.coverage)
@@ -1189,7 +1189,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
                 for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
                     const part = finalRequestBody.systemInstruction.parts[i];
                     if (part && typeof part.text === 'string') {
-                        const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+                        const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, disableJsonMasking: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
                         if (opt.cachedContents)
                             contextReport.cachedContents.push(...opt.cachedContents);
                         if (opt.coverage)

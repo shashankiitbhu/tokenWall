@@ -194,7 +194,7 @@ async function getOptimizedMessages(
   originalMessages: any[],
   cleanMessages: any[],
   model: string,
-  disableCodeCompression?: boolean,
+  disableMasking?: boolean,
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null
 ): Promise<any[]> {
@@ -208,7 +208,7 @@ async function getOptimizedMessages(
     let newText = cleanMsg.content;
     try {
       if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
@@ -280,7 +280,7 @@ async function getOptimizedGeminiContents(
   originalContents: any[],
   cleanMessages: any[],
   model: string,
-  disableCodeCompression?: boolean,
+  disableMasking?: boolean,
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null
 ): Promise<any[]> {
@@ -294,7 +294,7 @@ async function getOptimizedGeminiContents(
     let newText = cleanMsg.content;
     if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       try {
-        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression, optOutReason: disableCodeCompression ? 'system_guard' : null });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
@@ -913,10 +913,7 @@ async function handleInterception(
     }
   }
   
-  // We need hasEditTools early for attribution missed opportunities
-  const hasEditTools = request.body.tools && request.body.tools.some((t: any) => 
-    ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t?.function?.name)
-  );
+  // Interim safety guard has been removed: we no longer check for edit tools.
   
   let attribution: any = null;
   let categorySavings: Record<string, number> = {};
@@ -992,7 +989,7 @@ async function handleInterception(
     
     console.log('\nLargest remaining opportunity:');
     const remain = [
-      { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: hasEditTools ? 'Write-path safety bypass' : null },
+      { name: 'Source code', count: Math.max(0, attribution.sourceCodeTokens - categorySavings['Code compression']), reason: null },
       { name: 'Logs', count: Math.max(0, attribution.logsTokens - categorySavings['Log pruning']), reason: null },
       { name: 'JSON payloads', count: Math.max(0, attribution.jsonPayloadsTokens - categorySavings['JSON crushing']), reason: null },
       { name: 'Tool schemas', count: Math.max(0, attribution.toolSchemasTokens - categorySavings['Tool pruning']), reason: categorySavings['Tool pruning'] > 0 ? null : 'Safe heuristics preserved all tools' },
@@ -1024,7 +1021,7 @@ async function handleInterception(
   if (!isKillSwitchActive) {
     try {
       optimization = lastUserMsg
-        ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: hasEditTools })
+        ? await promptOptimizer.optimize(lastUserMsg.content, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null })
         : undefined;
     } catch (err: any) {
       console.error("[TokenWall Gateway] PromptOptimizer preview failed, falling open:", err.message);
@@ -1229,13 +1226,13 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage)
       };
       
       // Optimize top-level Anthropic system prompt
       if (provider === 'anthropic' && finalRequestBody.system) {
         if (typeof finalRequestBody.system === 'string') {
-          const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+          const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
           finalRequestBody.system = opt.optimizedText;
           if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
           if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
@@ -1243,7 +1240,7 @@ async function handleInterception(
           for (let i = 0; i < finalRequestBody.system.length; i++) {
             const block = finalRequestBody.system[i];
             if (block && block.type === 'text' && typeof block.text === 'string') {
-              const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+              const opt = await promptOptimizer.optimize(block.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
               if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
               if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
               finalRequestBody.system[i] = { ...block, text: opt.optimizedText };
@@ -1254,7 +1251,7 @@ async function handleInterception(
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, hasEditTools, contextReport.cachedContents, contextReport.coverage)
+        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage)
       };
       
       // Optimize top-level Gemini systemInstruction
@@ -1262,7 +1259,7 @@ async function handleInterception(
         for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
           const part = finalRequestBody.systemInstruction.parts[i];
           if (part && typeof part.text === 'string') {
-            const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: hasEditTools, optOutReason: hasEditTools ? 'system_guard' : null });
+            const opt = await promptOptimizer.optimize(part.text, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
             if (opt.cachedContents) contextReport.cachedContents.push(...opt.cachedContents);
             if (opt.coverage) aggregateCoverage(contextReport.coverage, opt.coverage);
             finalRequestBody.systemInstruction.parts[i] = { ...part, text: opt.optimizedText };
