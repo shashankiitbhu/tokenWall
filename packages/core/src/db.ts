@@ -472,6 +472,16 @@ export class DBManager {
     return res?.original_content;
   }
 
+  getCachedContentWithSessionCheck(id: string, requesterSessionId: string): string | undefined {
+    const res = this.db.prepare(`
+      SELECT c.original_content 
+      FROM cached_contents c
+      JOIN requests r ON c.request_id = r.id
+      WHERE c.id = ? AND r.session_id = ?
+    `).get(id, requesterSessionId) as { original_content: string } | undefined;
+    return res?.original_content;
+  }
+
   close() {
     this.db.close();
   }

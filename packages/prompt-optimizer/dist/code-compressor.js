@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CodeCompressor = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const tree_sitter_1 = __importDefault(require("tree-sitter"));
 const tree_sitter_javascript_1 = __importDefault(require("tree-sitter-javascript"));
 const tree_sitter_typescript_1 = __importDefault(require("tree-sitter-typescript"));
@@ -127,7 +128,8 @@ class CodeCompressor {
                     if (bodyNode) {
                         const lines = bodyNode.text.split('\n').length;
                         if (lines > 10) {
-                            const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
+                            const hash = crypto_1.default.createHash('sha256').update(bodyNode.text).digest('hex').substring(0, 32);
+                            const id = `ccr_sk_${hash}`;
                             cachedContents.push({ id, content: bodyNode.text });
                             const newlinesToPad = Math.max(0, lines - 1);
                             removeNodes.push({

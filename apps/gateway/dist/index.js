@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.applyReverseMapping = applyReverseMapping;
 const fastify_1 = __importDefault(require("fastify"));
 const fs_1 = __importDefault(require("fs"));
 const os_1 = __importDefault(require("os"));
@@ -174,7 +175,7 @@ function countGeminiContentsTokens(contents, model) {
     }
     return total;
 }
-function applyReverseMapping(targetContent, replacementContent, compressionMap) {
+function applyReverseMapping(targetContent, replacementContent, compressionMap, sessionId, requestId) {
     if (!compressionMap || compressionMap.length === 0)
         return { target: targetContent, replacement: replacementContent };
     for (const entry of compressionMap) {
@@ -189,18 +190,12 @@ function applyReverseMapping(targetContent, replacementContent, compressionMap) 
                     }
                 }
                 catch (e) {
-                    console.error("[TokenWall Gateway] ASTDiffer failed, falling back to line mapping", e);
+                    console.error("[TokenWall Gateway] ASTDiffer failed:", e.message);
                 }
             }
-            const prefix = compressed.substring(0, idx);
-            const startLine = prefix.split('\n').length - 1;
-            const endLine = startLine + targetContent.split('\n').length - 1;
-            const originalLines = original.split('\n');
-            const compressedLines = compressed.split('\n');
-            const expandedTarget = originalLines.slice(startLine, endLine + 1).join('\n');
-            const fullCompressedTarget = compressedLines.slice(startLine, endLine + 1).join('\n');
-            const expandedReplacement = fullCompressedTarget.replace(targetContent, replacementContent);
-            return { target: expandedTarget, replacement: expandedReplacement };
+            console.warn(`[TokenWall Gateway] ASTDiffer verification failed. Failing closed to prevent write-path corruption for request ${requestId}.`);
+            telemetryLogger.emitEvent({ eventType: 'reverse_mapping_failed', sessionId, requestId, metadata: { reason: 'verification_failed' } });
+            return { target: targetContent, replacement: replacementContent };
         }
     }
     return { target: targetContent, replacement: replacementContent };
@@ -230,10 +225,32 @@ function aggregateCoverage(target, source) {
         }
     }
 }
+const sessionToolHashMaps = new Map();
+// Simple GC for session deduplication maps
+setInterval(() => {
+    const now = Date.now();
+    for (const [sessionId, entry] of sessionToolHashMaps.entries()) {
+        // Evict maps that haven't been active in over 1 hour
+        if (now - entry.lastActive > 60 * 60 * 1000) {
+            sessionToolHashMaps.delete(sessionId);
+        }
+    }
+}, 5 * 60 * 1000); // Run every 5 minutes
 async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
     if (!originalMessages)
         return originalMessages;
-    const toolHashMap = new Map();
+    let toolHashMap;
+    if (sessionId) {
+        if (!sessionToolHashMaps.has(sessionId)) {
+            sessionToolHashMaps.set(sessionId, { lastActive: Date.now(), map: new Map() });
+        }
+        const entry = sessionToolHashMaps.get(sessionId);
+        entry.lastActive = Date.now();
+        toolHashMap = entry.map;
+    }
+    else {
+        toolHashMap = new Map();
+    }
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
     for (let i = 0; i < newMessages.length; i++) {
         const origMsg = newMessages[i];
@@ -321,7 +338,18 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
 async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
     if (!originalContents)
         return originalContents;
-    const toolHashMap = new Map();
+    let toolHashMap;
+    if (sessionId) {
+        if (!sessionToolHashMaps.has(sessionId)) {
+            sessionToolHashMaps.set(sessionId, { lastActive: Date.now(), map: new Map() });
+        }
+        const entry = sessionToolHashMaps.get(sessionId);
+        entry.lastActive = Date.now();
+        toolHashMap = entry.map;
+    }
+    else {
+        toolHashMap = new Map();
+    }
     const newContents = JSON.parse(JSON.stringify(originalContents));
     for (let i = 0; i < newContents.length; i++) {
         const origContent = newContents[i];
@@ -578,7 +606,7 @@ function injectAnthropicCacheControl(body) {
     }
     computePrefixHash(body);
 }
-async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
+async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = [], sessionId = 'unknown_session', requestId = 'unknown_request') {
     const response = await fetch(targetUrl, {
         method: 'POST',
         headers,
@@ -621,7 +649,7 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
     }
     if (hasCCRToolCall) {
         console.log(`[CCR] Intercepted CCR tool call for content_id: ${contentId}`);
-        const originalContent = db.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+        const originalContent = db.getCachedContentWithSessionCheck(contentId, sessionId) || "[Content not found in TokenWall cache (or access denied)]";
         if (provider === 'openai') {
             requestBody.messages.push(resBody.choices[0].message);
             requestBody.messages.push({
@@ -667,14 +695,14 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
                         try {
                             const args = JSON.parse(tc.function.arguments);
                             if (args.TargetContent && args.ReplacementContent) {
-                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                 args.TargetContent = target;
                                 args.ReplacementContent = replacement;
                             }
                             else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
                                 for (const chunk of args.ReplacementChunks) {
                                     if (chunk.TargetContent && chunk.ReplacementContent) {
-                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                         chunk.TargetContent = target;
                                         chunk.ReplacementContent = replacement;
                                     }
@@ -693,14 +721,14 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
                     if (block.type === 'tool_use' && (block.name === 'replace_file_content' || block.name === 'edit_file' || block.name === 'multi_replace_file_content')) {
                         if (block.input) {
                             if (block.input.TargetContent && block.input.ReplacementContent) {
-                                const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap);
+                                const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                 block.input.TargetContent = target;
                                 block.input.ReplacementContent = replacement;
                             }
                             else if (block.input.ReplacementChunks && Array.isArray(block.input.ReplacementChunks)) {
                                 for (const chunk of block.input.ReplacementChunks) {
                                     if (chunk.TargetContent && chunk.ReplacementContent) {
-                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                         chunk.TargetContent = target;
                                         chunk.ReplacementContent = replacement;
                                     }
@@ -718,14 +746,14 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
                         const args = part.functionCall.args;
                         if (args) {
                             if (args.TargetContent && args.ReplacementContent) {
-                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                 args.TargetContent = target;
                                 args.ReplacementContent = replacement;
                             }
                             else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
                                 for (const chunk of args.ReplacementChunks) {
                                     if (chunk.TargetContent && chunk.ReplacementContent) {
-                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                         chunk.TargetContent = target;
                                         chunk.ReplacementContent = replacement;
                                     }
@@ -923,7 +951,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                         }
                     }
                     console.log(`[Stream CCR] Resolving content_id: ${contentId} in request ${requestId}`);
-                    const originalContent = db.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+                    const originalContent = db.getCachedContentWithSessionCheck(contentId, sessionId) || "[Content not found in TokenWall cache (or access denied)]";
                     if (provider === 'openai') {
                         body.messages.push({
                             role: 'assistant',
@@ -1002,14 +1030,14 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                                     try {
                                         const args = JSON.parse(tc.function.arguments);
                                         if (args.TargetContent && args.ReplacementContent) {
-                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                             args.TargetContent = target;
                                             args.ReplacementContent = replacement;
                                         }
                                         else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
                                             for (const chunk of args.ReplacementChunks) {
                                                 if (chunk.TargetContent && chunk.ReplacementContent) {
-                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                                     chunk.TargetContent = target;
                                                     chunk.ReplacementContent = replacement;
                                                 }
@@ -1049,14 +1077,14 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                                     try {
                                         let args = typeof b.input === 'string' ? JSON.parse(b.input) : b.input;
                                         if (args.TargetContent && args.ReplacementContent) {
-                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                            const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                             args.TargetContent = target;
                                             args.ReplacementContent = replacement;
                                         }
                                         else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
                                             for (const chunk of args.ReplacementChunks) {
                                                 if (chunk.TargetContent && chunk.ReplacementContent) {
-                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                    const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                                     chunk.TargetContent = target;
                                                     chunk.ReplacementContent = replacement;
                                                 }
@@ -1091,14 +1119,14 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                                         try {
                                             let args = typeof p.functionCall.args === 'string' ? JSON.parse(p.functionCall.args) : p.functionCall.args;
                                             if (args.TargetContent && args.ReplacementContent) {
-                                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap);
+                                                const { target, replacement } = applyReverseMapping(args.TargetContent, args.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                                 args.TargetContent = target;
                                                 args.ReplacementContent = replacement;
                                             }
                                             else if (args.ReplacementChunks && Array.isArray(args.ReplacementChunks)) {
                                                 for (const chunk of args.ReplacementChunks) {
                                                     if (chunk.TargetContent && chunk.ReplacementContent) {
-                                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                                         chunk.TargetContent = target;
                                                         chunk.ReplacementContent = replacement;
                                                     }

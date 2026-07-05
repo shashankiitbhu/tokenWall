@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import TypeScript from 'tree-sitter-typescript';
@@ -175,7 +176,8 @@ export class CodeCompressor {
           if (bodyNode) {
             const lines = bodyNode.text.split('\n').length;
             if (lines > 10) {
-              const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
+              const hash = crypto.createHash('sha256').update(bodyNode.text).digest('hex').substring(0, 32);
+              const id = `ccr_sk_${hash}`;
               cachedContents.push({ id, content: bodyNode.text });
               const newlinesToPad = Math.max(0, lines - 1);
               removeNodes.push({

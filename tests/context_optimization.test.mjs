@@ -3,6 +3,8 @@ import { spawn } from 'child_process';
 import { DBManager } from '../packages/core/dist/db.js';
 import { JsonCrusher, CodeCompressor, ContextAnalyzer, CacheAlignerPipeline } from '../packages/context-engine/dist/index.js';
 import { PromptOptimizer } from '../packages/prompt-optimizer/dist/index.js';
+import { ASTDiffer } from '../packages/prompt-optimizer/dist/index.js';
+import { applyReverseMapping } from '../apps/gateway/dist/index.js';
 
 async function testCompressors() {
   console.log('Testing JsonCrusher...');
@@ -246,6 +248,44 @@ function doComplexWork() {
   console.log('PromptOptimizer CCR and Truncation works!');
 }
 
+
+
+
+async function testReverseMapping() {
+  console.log('Testing applyReverseMapping Fail-Closed behavior...');
+  
+  const original = `function target() { console.log('hello'); }`;
+  const compressed = `{ /* [TokenWall Reversible Content: ccr_sk_test] */ }`;
+  const mappings = [{ originalStart: 0, originalEnd: original.length, replaceWith: compressed }];
+
+  const compressionMap = [{ original, compressed, mappings }];
+
+  const targetContent = compressed;
+  const replacementContent = `function target() { console.log('world'); }`;
+
+  // Create valid session and request to satisfy foreign key constraints
+  const db = new DBManager();
+  db.db.prepare("INSERT OR IGNORE INTO sessions (id, project_id, session_budget) VALUES ('test-session', null, 10.0)").run();
+  db.db.prepare("INSERT OR IGNORE INTO requests (id, session_id, provider, model, input_tokens, output_tokens, cost, status, state) VALUES ('test-req', 'test-session', 'openai', 'gpt-4', 0, 0, 0.0, 'success', 'reconciled')").run();
+
+  // Mock ASTDiffer to simulate a catastrophic failure in diffing/verification
+  const originalRunASTDiff = ASTDiffer.runASTDiff;
+  ASTDiffer.runASTDiff = () => {
+    throw new Error("Simulated ASTDiffer failure");
+  };
+
+  const result = applyReverseMapping(targetContent, replacementContent, compressionMap, 'test-session', 'test-req');
+  
+  // Restore mock
+  ASTDiffer.runASTDiff = originalRunASTDiff;
+
+  // Verify it failed closed (returned target unmodified)
+  assert.equal(result.target, compressed, "Target should remain unmodified on failure");
+  assert.equal(result.replacement, replacementContent, "Replacement should remain unmodified on failure");
+
+  console.log('applyReverseMapping tests pass!');
+}
+
 async function run() {
   await testCompressors();
   await testCacheAligner();
@@ -253,6 +293,7 @@ async function run() {
   await testSQLiteCCR();
   await testRecursiveCCRInterception();
   await testPromptOptimizer();
+  await testReverseMapping();
   console.log('\n🎉 ALL CONTEXT OPTIMIZATION TESTS PASSED!');
 }
 

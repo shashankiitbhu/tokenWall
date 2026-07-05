@@ -98,5 +98,6 @@ export declare class DBManager {
     };
     saveCachedContent(id: string, requestId: string, content: string): void;
     getCachedContent(id: string): string | undefined;
+    getCachedContentWithSessionCheck(id: string, requesterSessionId: string): string | undefined;
     close(): void;
 }

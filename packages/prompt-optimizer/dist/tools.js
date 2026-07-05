@@ -224,10 +224,9 @@ class ToolPayloadCrusher {
         // Content-based hashing handles this correctly for free and prevents state drift.
         let contentId = '';
         if (lines.length > 100 || noAnsi.length > 4000) {
-            if (sessionId && dedupMap && turnIndex !== undefined) {
-                // Compute truncated SHA-256 hash (16 bytes / 32 hex chars) of raw pre-pruned content
-                const hash = crypto.createHash('sha256').update(noAnsi).digest('hex').substring(0, 32);
-                contentId = `ccr_txt_${sessionId}_${hash}`;
+            const hash = crypto.createHash('sha256').update(noAnsi).digest('hex').substring(0, 32);
+            contentId = `ccr_txt_${hash}`;
+            if (dedupMap && turnIndex !== undefined) {
                 if (dedupMap.has(hash)) {
                     const { turnIndex: firstTurn, cacheId } = dedupMap.get(hash);
                     return `[Tool Output: identical to Message ${firstTurn}, content_id='${cacheId}']`;
@@ -235,10 +234,6 @@ class ToolPayloadCrusher {
                 else {
                     dedupMap.set(hash, { turnIndex, cacheId: contentId });
                 }
-            }
-            else {
-                // Fallback random ID if tracking is unavailable
-                contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
             }
         }
         // Attempt standard JSON parsing

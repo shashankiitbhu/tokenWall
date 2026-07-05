@@ -13,8 +13,12 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
 var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ToolTrimmer = exports.ToolPruner = exports.PromptOptimizer = exports.ASTDiffApplier = exports.ASTDiffer = exports.CodeChunker = void 0;
+const crypto_1 = __importDefault(require("crypto"));
 const estimators_1 = require("@tokenwall/estimators");
 const code_compressor_1 = require("./code-compressor");
 const tool_pruner_1 = require("./tool-pruner");
@@ -81,8 +85,10 @@ function minifyJsonBlocks(text, metrics, disableJsonMasking) {
                 if (Array.isArray(obj)) {
                     // Array compression
                     if (obj.length > 50 && !disableJsonMasking) {
-                        const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
-                        cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
+                        const contentString = JSON.stringify(obj.slice(3));
+                        const hash = crypto_1.default.createHash('sha256').update(contentString).digest('hex').substring(0, 32);
+                        const id = `ccr_js_${hash}`;
+                        cachedContents.push({ id, content: contentString });
                         return [
                             walk(obj[0]),
                             walk(obj[1]),
@@ -109,7 +115,8 @@ function minifyJsonBlocks(text, metrics, disableJsonMasking) {
                         if (isUUID || isJWT || isHex || isBase64) {
                             return obj; // Bypass truncation for IDs and tokens
                         }
-                        const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                        const hash = crypto_1.default.createHash('sha256').update(obj).digest('hex').substring(0, 32);
+                        const id = `ccr_js_${hash}`;
                         cachedContents.push({ id, content: obj });
                         return obj.substring(0, 100) + `... [TokenWall Reversible Content: ${id} - string truncated, original length ${obj.length}. Use tokenwall_retrieve_content tool with content_id='${id}'] ...` + obj.substring(obj.length - 100);
                     }

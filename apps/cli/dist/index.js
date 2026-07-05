@@ -411,6 +411,15 @@ var require_db = __commonJS({
         const res = this.db.prepare("SELECT original_content FROM cached_contents WHERE id = ?").get(id);
         return res?.original_content;
       }
+      getCachedContentWithSessionCheck(id, requesterSessionId) {
+        const res = this.db.prepare(`
+      SELECT c.original_content 
+      FROM cached_contents c
+      JOIN requests r ON c.request_id = r.id
+      WHERE c.id = ? AND r.session_id = ?
+    `).get(id, requesterSessionId);
+        return res?.original_content;
+      }
       close() {
         this.db.close();
       }
@@ -39068,6 +39077,7 @@ var require_code_compressor = __commonJS({
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.CodeCompressor = void 0;
+    var crypto_1 = __importDefault(require("crypto"));
     var tree_sitter_1 = __importDefault(require("tree-sitter"));
     var tree_sitter_javascript_1 = __importDefault(require("tree-sitter-javascript"));
     var tree_sitter_typescript_1 = __importDefault(require("tree-sitter-typescript"));
@@ -39184,7 +39194,8 @@ ${sparsified}
               if (bodyNode) {
                 const lines = bodyNode.text.split("\n").length;
                 if (lines > 10) {
-                  const id = `ccr_sk_${Math.random().toString(36).substring(2, 9)}`;
+                  const hash = crypto_1.default.createHash("sha256").update(bodyNode.text).digest("hex").substring(0, 32);
+                  const id = `ccr_sk_${hash}`;
                   cachedContents.push({ id, content: bodyNode.text });
                   const newlinesToPad = Math.max(0, lines - 1);
                   removeNodes.push({
@@ -39438,17 +39449,15 @@ var require_tools2 = __commonJS({
         const lines = noAnsi.split("\n");
         let contentId = "";
         if (lines.length > 100 || noAnsi.length > 4e3) {
-          if (sessionId && dedupMap && turnIndex !== void 0) {
-            const hash = crypto.createHash("sha256").update(noAnsi).digest("hex").substring(0, 32);
-            contentId = `ccr_txt_${sessionId}_${hash}`;
+          const hash = crypto.createHash("sha256").update(noAnsi).digest("hex").substring(0, 32);
+          contentId = `ccr_txt_${hash}`;
+          if (dedupMap && turnIndex !== void 0) {
             if (dedupMap.has(hash)) {
               const { turnIndex: firstTurn, cacheId } = dedupMap.get(hash);
               return `[Tool Output: identical to Message ${firstTurn}, content_id='${cacheId}']`;
             } else {
               dedupMap.set(hash, { turnIndex, cacheId: contentId });
             }
-          } else {
-            contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
           }
         }
         try {
@@ -39922,8 +39931,12 @@ var require_dist11 = __commonJS({
     var __exportStar = exports2 && exports2.__exportStar || function(m, exports3) {
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
+    var __importDefault = exports2 && exports2.__importDefault || function(mod) {
+      return mod && mod.__esModule ? mod : { "default": mod };
+    };
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ToolTrimmer = exports2.ToolPruner = exports2.PromptOptimizer = exports2.ASTDiffApplier = exports2.ASTDiffer = exports2.CodeChunker = void 0;
+    var crypto_1 = __importDefault(require("crypto"));
     var estimators_1 = require_dist7();
     var code_compressor_1 = require_code_compressor();
     var tool_pruner_1 = require_tool_pruner();
@@ -39997,8 +40010,10 @@ var require_dist11 = __commonJS({
           const walk = (obj) => {
             if (Array.isArray(obj)) {
               if (obj.length > 50 && !disableJsonMasking) {
-                const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
-                cachedContents.push({ id, content: JSON.stringify(obj.slice(3)) });
+                const contentString = JSON.stringify(obj.slice(3));
+                const hash = crypto_1.default.createHash("sha256").update(contentString).digest("hex").substring(0, 32);
+                const id = `ccr_js_${hash}`;
+                cachedContents.push({ id, content: contentString });
                 return [
                   walk(obj[0]),
                   walk(obj[1]),
@@ -40022,7 +40037,8 @@ var require_dist11 = __commonJS({
                 if (isUUID || isJWT || isHex || isBase64) {
                   return obj;
                 }
-                const id = `ccr_js_${Math.random().toString(36).substring(2, 9)}`;
+                const hash = crypto_1.default.createHash("sha256").update(obj).digest("hex").substring(0, 32);
+                const id = `ccr_js_${hash}`;
                 cachedContents.push({ id, content: obj });
                 return obj.substring(0, 100) + `... [TokenWall Reversible Content: ${id} - string truncated, original length ${obj.length}. Use tokenwall_retrieve_content tool with content_id='${id}'] ...` + obj.substring(obj.length - 100);
               }
@@ -50487,6 +50503,7 @@ var require_dist16 = __commonJS({
       return mod && mod.__esModule ? mod : { "default": mod };
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.applyReverseMapping = applyReverseMapping;
     var fastify_1 = __importDefault(require_fastify());
     var fs_1 = __importDefault(require("fs"));
     var os_1 = __importDefault(require("os"));
@@ -50622,7 +50639,7 @@ var require_dist16 = __commonJS({
       const targetUrl = `${baseUrl}${modelUrl}`;
       return handleInterception("gemini", targetUrl, request, reply);
     });
-    function applyReverseMapping(targetContent, replacementContent, compressionMap) {
+    function applyReverseMapping(targetContent, replacementContent, compressionMap, sessionId, requestId) {
       if (!compressionMap || compressionMap.length === 0)
         return { target: targetContent, replacement: replacementContent };
       for (const entry of compressionMap) {
@@ -50636,18 +50653,12 @@ var require_dist16 = __commonJS({
                 return { target, replacement };
               }
             } catch (e) {
-              console.error("[TokenWall Gateway] ASTDiffer failed, falling back to line mapping", e);
+              console.error("[TokenWall Gateway] ASTDiffer failed:", e.message);
             }
           }
-          const prefix = compressed.substring(0, idx);
-          const startLine = prefix.split("\n").length - 1;
-          const endLine = startLine + targetContent.split("\n").length - 1;
-          const originalLines = original.split("\n");
-          const compressedLines = compressed.split("\n");
-          const expandedTarget = originalLines.slice(startLine, endLine + 1).join("\n");
-          const fullCompressedTarget = compressedLines.slice(startLine, endLine + 1).join("\n");
-          const expandedReplacement = fullCompressedTarget.replace(targetContent, replacementContent);
-          return { target: expandedTarget, replacement: expandedReplacement };
+          console.warn(`[TokenWall Gateway] ASTDiffer verification failed. Failing closed to prevent write-path corruption for request ${requestId}.`);
+          telemetryLogger.emitEvent({ eventType: "reverse_mapping_failed", sessionId, requestId, metadata: { reason: "verification_failed" } });
+          return { target: targetContent, replacement: replacementContent };
         }
       }
       return { target: targetContent, replacement: replacementContent };
@@ -50677,10 +50688,29 @@ var require_dist16 = __commonJS({
         }
       }
     }
+    var sessionToolHashMaps = /* @__PURE__ */ new Map();
+    setInterval(() => {
+      const now = Date.now();
+      for (const [sessionId, entry] of sessionToolHashMaps.entries()) {
+        if (now - entry.lastActive > 60 * 60 * 1e3) {
+          sessionToolHashMaps.delete(sessionId);
+        }
+      }
+    }, 5 * 60 * 1e3);
     async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
       if (!originalMessages)
         return originalMessages;
-      const toolHashMap = /* @__PURE__ */ new Map();
+      let toolHashMap;
+      if (sessionId) {
+        if (!sessionToolHashMaps.has(sessionId)) {
+          sessionToolHashMaps.set(sessionId, { lastActive: Date.now(), map: /* @__PURE__ */ new Map() });
+        }
+        const entry = sessionToolHashMaps.get(sessionId);
+        entry.lastActive = Date.now();
+        toolHashMap = entry.map;
+      } else {
+        toolHashMap = /* @__PURE__ */ new Map();
+      }
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
       for (let i = 0; i < newMessages.length; i++) {
         const origMsg = newMessages[i];
@@ -50760,7 +50790,17 @@ var require_dist16 = __commonJS({
     async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
       if (!originalContents)
         return originalContents;
-      const toolHashMap = /* @__PURE__ */ new Map();
+      let toolHashMap;
+      if (sessionId) {
+        if (!sessionToolHashMaps.has(sessionId)) {
+          sessionToolHashMaps.set(sessionId, { lastActive: Date.now(), map: /* @__PURE__ */ new Map() });
+        }
+        const entry = sessionToolHashMaps.get(sessionId);
+        entry.lastActive = Date.now();
+        toolHashMap = entry.map;
+      } else {
+        toolHashMap = /* @__PURE__ */ new Map();
+      }
       const newContents = JSON.parse(JSON.stringify(originalContents));
       for (let i = 0; i < newContents.length; i++) {
         const origContent = newContents[i];
@@ -51002,7 +51042,7 @@ ${steeringMsg}`;
       }
       computePrefixHash(body);
     }
-    async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
+    async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = [], sessionId = "unknown_session", requestId = "unknown_request") {
       const response = await fetch(targetUrl, {
         method: "POST",
         headers,
@@ -51042,7 +51082,7 @@ ${steeringMsg}`;
       }
       if (hasCCRToolCall) {
         console.log(`[CCR] Intercepted CCR tool call for content_id: ${contentId}`);
-        const originalContent = db2.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+        const originalContent = db2.getCachedContentWithSessionCheck(contentId, sessionId) || "[Content not found in TokenWall cache (or access denied)]";
         if (provider === "openai") {
           requestBody.messages.push(resBody.choices[0].message);
           requestBody.messages.push({
@@ -51086,13 +51126,13 @@ ${steeringMsg}`;
                 try {
                   const args2 = JSON.parse(tc.function.arguments);
                   if (args2.TargetContent && args2.ReplacementContent) {
-                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap, sessionId, requestId);
                     args2.TargetContent = target;
                     args2.ReplacementContent = replacement;
                   } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
                     for (const chunk of args2.ReplacementChunks) {
                       if (chunk.TargetContent && chunk.ReplacementContent) {
-                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                         chunk.TargetContent = target;
                         chunk.ReplacementContent = replacement;
                       }
@@ -51110,13 +51150,13 @@ ${steeringMsg}`;
               if (block.type === "tool_use" && (block.name === "replace_file_content" || block.name === "edit_file" || block.name === "multi_replace_file_content")) {
                 if (block.input) {
                   if (block.input.TargetContent && block.input.ReplacementContent) {
-                    const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap);
+                    const { target, replacement } = applyReverseMapping(block.input.TargetContent, block.input.ReplacementContent, globalCompressionMap, sessionId, requestId);
                     block.input.TargetContent = target;
                     block.input.ReplacementContent = replacement;
                   } else if (block.input.ReplacementChunks && Array.isArray(block.input.ReplacementChunks)) {
                     for (const chunk of block.input.ReplacementChunks) {
                       if (chunk.TargetContent && chunk.ReplacementContent) {
-                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                         chunk.TargetContent = target;
                         chunk.ReplacementContent = replacement;
                       }
@@ -51133,13 +51173,13 @@ ${steeringMsg}`;
                 const args2 = part.functionCall.args;
                 if (args2) {
                   if (args2.TargetContent && args2.ReplacementContent) {
-                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                    const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap, sessionId, requestId);
                     args2.TargetContent = target;
                     args2.ReplacementContent = replacement;
                   } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
                     for (const chunk of args2.ReplacementChunks) {
                       if (chunk.TargetContent && chunk.ReplacementContent) {
-                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                        const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                         chunk.TargetContent = target;
                         chunk.ReplacementContent = replacement;
                       }
@@ -51325,7 +51365,7 @@ ${steeringMsg}`;
                 }
               }
               console.log(`[Stream CCR] Resolving content_id: ${contentId} in request ${requestId}`);
-              const originalContent = db2.getCachedContent(contentId) || "[Content not found in TokenWall cache]";
+              const originalContent = db2.getCachedContentWithSessionCheck(contentId, sessionId) || "[Content not found in TokenWall cache (or access denied)]";
               if (provider === "openai") {
                 body.messages.push({
                   role: "assistant",
@@ -51400,13 +51440,13 @@ ${steeringMsg}`;
                       try {
                         const args2 = JSON.parse(tc.function.arguments);
                         if (args2.TargetContent && args2.ReplacementContent) {
-                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap, sessionId, requestId);
                           args2.TargetContent = target;
                           args2.ReplacementContent = replacement;
                         } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
                           for (const chunk of args2.ReplacementChunks) {
                             if (chunk.TargetContent && chunk.ReplacementContent) {
-                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                               chunk.TargetContent = target;
                               chunk.ReplacementContent = replacement;
                             }
@@ -51449,13 +51489,13 @@ ${steeringMsg}`;
                       try {
                         let args2 = typeof b.input === "string" ? JSON.parse(b.input) : b.input;
                         if (args2.TargetContent && args2.ReplacementContent) {
-                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                          const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap, sessionId, requestId);
                           args2.TargetContent = target;
                           args2.ReplacementContent = replacement;
                         } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
                           for (const chunk of args2.ReplacementChunks) {
                             if (chunk.TargetContent && chunk.ReplacementContent) {
-                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                              const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                               chunk.TargetContent = target;
                               chunk.ReplacementContent = replacement;
                             }
@@ -51515,13 +51555,13 @@ data: ${JSON.stringify({ type: "message_stop" })}
                         try {
                           let args2 = typeof p.functionCall.args === "string" ? JSON.parse(p.functionCall.args) : p.functionCall.args;
                           if (args2.TargetContent && args2.ReplacementContent) {
-                            const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap);
+                            const { target, replacement } = applyReverseMapping(args2.TargetContent, args2.ReplacementContent, globalCompressionMap, sessionId, requestId);
                             args2.TargetContent = target;
                             args2.ReplacementContent = replacement;
                           } else if (args2.ReplacementChunks && Array.isArray(args2.ReplacementChunks)) {
                             for (const chunk of args2.ReplacementChunks) {
                               if (chunk.TargetContent && chunk.ReplacementContent) {
-                                const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap);
+                                const { target, replacement } = applyReverseMapping(chunk.TargetContent, chunk.ReplacementContent, globalCompressionMap, sessionId, requestId);
                                 chunk.TargetContent = target;
                                 chunk.ReplacementContent = replacement;
                               }
