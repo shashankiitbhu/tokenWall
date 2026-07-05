@@ -679,7 +679,7 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
     }
     return { response, resBody };
 }
-async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = []) {
+async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = [], initialResponse = null, hasCCR = false) {
     let inputAccumulated = 0;
     let outputAccumulated = 0;
     let streamFailed = false;
@@ -687,11 +687,12 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
     return new ReadableStream({
         async start(controller) {
             async function runTurn(body) {
-                const response = await fetch(targetUrl, {
+                const response = initialResponse || await fetch(targetUrl, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify(body)
                 });
+                initialResponse = null;
                 if (!response.ok) {
                     const errorText = await response.text();
                     const err = new Error(`Upstream error: ${response.status} - ${errorText}`);
@@ -804,6 +805,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                     }
                 });
                 const bufferChunks = [];
+                const mustBuffer = hasCCR || globalCompressionMap.length > 0;
                 try {
                     while (true) {
                         const { done, value } = await reader.read();
@@ -812,7 +814,12 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                         }
                         const chunkText = decoder.decode(value, { stream: true });
                         parser.feed(chunkText);
-                        bufferChunks.push(value);
+                        if (mustBuffer) {
+                            bufferChunks.push(value);
+                        }
+                        else {
+                            controller.enqueue(value);
+                        }
                     }
                 }
                 catch (err) {
@@ -920,7 +927,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                         if (provider === 'gemini' && fullAssistantResponseForTurn?.parts?.some((p) => p.functionCall && (p.functionCall.name === 'replace_file_content' || p.functionCall.name === 'edit_file' || p.functionCall.name === 'multi_replace_file_content')))
                             needsReverseMapping = true;
                     }
-                    if (needsReverseMapping) {
+                    if (needsReverseMapping && mustBuffer) {
                         console.log(`[Stream CCR] Reverse mapping edit tool for request ${requestId}`);
                         const encoder = new TextEncoder();
                         if (provider === 'openai') {
@@ -1040,7 +1047,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ candidates: [{ content: fullAssistantResponseForTurn }] })}\n\n`));
                         }
                     }
-                    else {
+                    else if (mustBuffer) {
                         for (const chunk of bufferChunks) {
                             controller.enqueue(chunk);
                         }
@@ -1623,10 +1630,23 @@ async function handleInterception(provider, targetUrl, request, reply) {
         }
         // Streaming Response proxy with CCR recursive check
         telemetryLogger.emitEvent({ eventType: 'provider_stream_started', sessionId, requestId, provider, model: finalRequest.model });
-        reply.header('content-type', 'text/event-stream');
-        reply.header('cache-control', 'no-cache');
-        reply.header('connection', 'keep-alive');
-        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap);
+        const initialResponse = await fetch(targetUrl, {
+            method: 'POST',
+            headers: forwardHeaders,
+            body: JSON.stringify(finalRequestBody)
+        });
+        if (!initialResponse.ok) {
+            const errorText = await initialResponse.text();
+            telemetryLogger.emitEvent({ eventType: 'request_stream_failed', sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
+            telemetryLogger.reconcileRequest(requestId, 0.0, 'failed', 'failed');
+            telemetryLogger.emitEvent({ eventType: 'request_reconciled', sessionId, requestId, metadata: { state: 'failed' } });
+            return reply.status(initialResponse.status).send(errorText);
+        }
+        for (const [key, value] of initialResponse.headers.entries()) {
+            reply.header(key, value);
+        }
+        const hasCCR = (contextReport.cachedContents && contextReport.cachedContents.length > 0);
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap, initialResponse, hasCCR);
         return reply.send(stream);
     }
     catch (error) {
