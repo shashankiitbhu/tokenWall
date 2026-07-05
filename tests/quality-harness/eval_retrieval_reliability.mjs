@@ -84,7 +84,7 @@ async function callGemini(messages, tools) {
       message: {
         content: null,
         tool_calls: [{
-          id: part.functionCall.name + "_id", // Note: Assumes 1 tool call per message for simplicity in this harness // Note: Assumes 1 tool call per message for simplicity in this harness
+          id: part.functionCall.name + "_id", // Note: Assumes 1 tool call per message for simplicity in this harness // Note: Assumes 1 tool call per message for simplicity in this harness // Note: Assumes 1 tool call per message for simplicity in this harness
           function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args) }
         }],
         raw_gemini_parts: resBody.candidates[0].content.parts
@@ -312,8 +312,13 @@ async function main() {
 
         // Turn 1: Model answers easily (no retrieve needed, but tools available realistically)
         
+        
         const res1 = await callLLM(messages, [RETRIEVE_TOOL]);
         messages.push(res1.message);
+        if (res1.message.tool_calls && res1.message.tool_calls.length > 0) {
+          throw new Error("Model hallucinated a tool call on Turn 1 instead of acknowledging");
+        }
+
         if (res1.message.tool_calls && res1.message.tool_calls.length > 0) {
           throw new Error("Model hallucinated a tool call on Turn 1 instead of acknowledging");
         }
@@ -487,6 +492,89 @@ async function main() {
               const res3 = await callLLM(messages, [RETRIEVE_TOOL]);
               const res3Text = (res3.message.content || '') + JSON.stringify(res3.message.tool_calls || []);
               if (res3Text.includes('token_12345') && res3Text.includes('8080')) {
+                  correctFinalEdit = true;
+              }
+          }
+        }
+        return { retrievedBeforeAct, correctId, correctFinalEdit };
+      }
+,
+    {
+      name: "Multi-retrieve (Two masked regions)",
+      fn: async (callLLM) => {
+        const rawCode1 = `function setupDatabase() {
+  let db = new Database();
+  db.connect();
+  // padding
+  // padding
+  // padding
+  // padding
+  // padding
+  db.setToken("token_12345");
+  return db;
+}`;
+        const rawCode2 = `function configureApp() {
+  let app = new App();
+  app.init();
+  // padding
+  // padding
+  // padding
+  // padding
+  // padding
+  app.setPort(8080);
+  return app;
+}`;
+        const opt = await optimizer.optimize("```javascript\n" + rawCode1 + "\n```\n\nSome text\n\n```javascript\n" + rawCode2 + "\n```", 'gpt-4', { disableCodeCompression: false, disableJsonMasking: false });
+        const masked = opt.optimizedText;
+        const skTokens = opt.cachedContents.filter(c => c.id.startsWith('ccr_sk_'));
+        
+        let messages = [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: `Here is the setup code:\n\n${masked}\n\nPlease output the database token and the app port.` }
+        ];
+
+        let retrievedBeforeAct = false;
+        let correctId = false;
+        let correctFinalEdit = false;
+
+        const res1 = await callLLM(messages, [RETRIEVE_TOOL]);
+        if (res1.message.tool_calls) {
+          retrievedBeforeAct = true;
+          // check if both were retrieved or just one
+          let calledIds = [];
+          for (const tc of res1.message.tool_calls) {
+             if (tc.function.name === 'tokenwall_retrieve_content') {
+                 const args = JSON.parse(tc.function.arguments);
+                 calledIds.push(args.content_id);
+             }
+          }
+          if (calledIds.includes(skTokens[0].id) && calledIds.includes(skTokens[1].id)) {
+              correctId = true;
+          } else if (calledIds.length > 0) {
+              correctId = true; // At least tried one correctly
+          }
+          
+          messages.push(res1.message);
+          for (const tc of res1.message.tool_calls) {
+             const args = JSON.parse(tc.function.arguments);
+             const content = skTokens.find(s => s.id === args.content_id)?.content || "ERROR";
+             messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: tc.id, content });
+          }
+          
+          // Could technically loop if it retrieved 1 by 1, but let's assume it grabs both or finishes
+          const res2 = await callLLM(messages, []);
+          if (res2.message.content && res2.message.content.includes('token_12345') && res2.message.content.includes('8080')) {
+              correctFinalEdit = true;
+          } else if (res2.message.tool_calls) {
+              // Handle sequential retrieval (Gemini sometimes does this)
+              messages.push(res2.message);
+              for (const tc of res2.message.tool_calls) {
+                 const args = JSON.parse(tc.function.arguments);
+                 const content = skTokens.find(s => s.id === args.content_id)?.content || "ERROR";
+                 messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: tc.id, content });
+              }
+              const res3 = await callLLM(messages, []);
+              if (res3.message.content && res3.message.content.includes('token_12345') && res3.message.content.includes('8080')) {
                   correctFinalEdit = true;
               }
           }

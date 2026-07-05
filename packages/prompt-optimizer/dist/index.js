@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ToolPruner = exports.PromptOptimizer = exports.ASTDiffApplier = exports.ASTDiffer = exports.CodeChunker = void 0;
+exports.ToolTrimmer = exports.ToolPruner = exports.PromptOptimizer = exports.ASTDiffApplier = exports.ASTDiffer = exports.CodeChunker = void 0;
 const estimators_1 = require("@tokenwall/estimators");
 const code_compressor_1 = require("./code-compressor");
 const tool_pruner_1 = require("./tool-pruner");
@@ -271,4 +271,6 @@ class PromptOptimizer {
 }
 exports.PromptOptimizer = PromptOptimizer;
 __exportStar(require("./tools"), exports);
+var tool_trimmer_1 = require("./tool-trimmer");
+Object.defineProperty(exports, "ToolTrimmer", { enumerable: true, get: function () { return tool_trimmer_1.ToolTrimmer; } });
 __exportStar(require("./verbosity-steering"), exports);

@@ -307,4 +307,5 @@ export class PromptOptimizer {
 
 export * from './tools';
 export { ToolPruner };
+export { ToolTrimmer } from './tool-trimmer';
 export * from './verbosity-steering';

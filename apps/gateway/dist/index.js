@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fastify_1 = __importDefault(require("fastify"));
 const fs_1 = __importDefault(require("fs"));
 const os_1 = __importDefault(require("os"));
+const crypto_1 = require("crypto");
 const core_1 = require("@tokenwall/core");
 const providers_1 = require("@tokenwall/providers");
 const estimators_1 = require("@tokenwall/estimators");
@@ -473,10 +474,36 @@ function injectSystemInstructions(provider, body, config, contextReport) {
         }
     }
 }
+function isVolatile(text) {
+    if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text))
+        return true;
+    if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text))
+        return true;
+    if (/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} (am|pm)/i.test(text))
+        return true;
+    return false;
+}
+function computePrefixHash(body) {
+    let prefixPayload = {};
+    if (body.system)
+        prefixPayload.system = body.system;
+    if (body.tools)
+        prefixPayload.tools = body.tools;
+    if (body.messages) {
+        prefixPayload.messages = [];
+        for (const msg of body.messages) {
+            prefixPayload.messages.push(msg);
+            if (JSON.stringify(msg).includes('"cache_control"')) {
+                break;
+            }
+        }
+    }
+    const hash = (0, crypto_1.createHash)('sha256').update(JSON.stringify(prefixPayload)).digest('hex');
+    console.log(`[TokenWall Gateway] [Prefix Hash] ${hash.substring(0, 8)}... (Full: ${hash})`);
+}
 function injectAnthropicCacheControl(body) {
-    // If the client (like Claude Code) natively uses prompt caching, do NOT interfere.
-    // Anthropic has a strict limit of 4 cache_control blocks per request.
     if (JSON.stringify(body).includes('"cache_control"')) {
+        computePrefixHash(body);
         return;
     }
     if (body.system) {
@@ -498,18 +525,27 @@ function injectAnthropicCacheControl(body) {
             lastTool.cache_control = { type: 'ephemeral' };
         }
     }
-    if (body.messages && Array.isArray(body.messages) && body.messages.length > 3) {
-        const userMessages = body.messages.filter((m) => m.role === 'user');
-        if (userMessages.length > 0) {
-            const lastUserMsg = userMessages[userMessages.length - 1];
-            if (lastUserMsg && lastUserMsg.content) {
-                if (typeof lastUserMsg.content === 'string') {
-                    lastUserMsg.content = [
-                        { type: 'text', text: lastUserMsg.content, cache_control: { type: 'ephemeral' } }
+    if (body.messages && Array.isArray(body.messages) && body.messages.length > 1) {
+        let lastDeterministicIndex = -1;
+        for (let i = 0; i < body.messages.length - 1; i++) {
+            const msgContent = typeof body.messages[i].content === 'string'
+                ? body.messages[i].content
+                : JSON.stringify(body.messages[i].content);
+            if (isVolatile(msgContent)) {
+                break;
+            }
+            lastDeterministicIndex = i;
+        }
+        if (lastDeterministicIndex !== -1) {
+            const msgToCache = body.messages[lastDeterministicIndex];
+            if (msgToCache && msgToCache.content) {
+                if (typeof msgToCache.content === 'string') {
+                    msgToCache.content = [
+                        { type: 'text', text: msgToCache.content, cache_control: { type: 'ephemeral' } }
                     ];
                 }
-                else if (Array.isArray(lastUserMsg.content) && lastUserMsg.content.length > 0) {
-                    const lastBlock = lastUserMsg.content[lastUserMsg.content.length - 1];
+                else if (Array.isArray(msgToCache.content) && msgToCache.content.length > 0) {
+                    const lastBlock = msgToCache.content[msgToCache.content.length - 1];
                     if (typeof lastBlock === 'object') {
                         lastBlock.cache_control = { type: 'ephemeral' };
                     }
@@ -517,6 +553,7 @@ function injectAnthropicCacheControl(body) {
             }
         }
     }
+    computePrefixHash(body);
 }
 async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
     const response = await fetch(targetUrl, {
@@ -1155,9 +1192,12 @@ async function handleInterception(provider, targetUrl, request, reply) {
         let toolPruningSavings = 0;
         try {
             toolPruningSavings = prompt_optimizer_1.ToolPruner.pruneTools(provider, request.body, parsedRequest.model, contextStr);
+            if (request.body.tools) {
+                request.body.tools = prompt_optimizer_1.ToolTrimmer.trim(request.body.tools);
+            }
         }
         catch (e) {
-            console.error("[TokenWall Gateway] ToolPruner failed:", e.message);
+            console.error("[TokenWall Gateway] Tool pruning/trimming failed:", e.message);
         }
         categorySavings = {
             'JSON crushing': 0,

@@ -39762,6 +39762,60 @@ var require_ast_differ = __commonJS({
   }
 });
 
+// packages/prompt-optimizer/dist/tool-trimmer.js
+var require_tool_trimmer = __commonJS({
+  "packages/prompt-optimizer/dist/tool-trimmer.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.ToolTrimmer = void 0;
+    var ToolTrimmer = class {
+      static trim(tools) {
+        if (!tools || !Array.isArray(tools))
+          return tools;
+        for (const tool of tools) {
+          if (typeof tool === "object" && tool !== null) {
+            if (tool.function && typeof tool.function.name === "string") {
+              this.applyTrims(tool.function);
+            } else if (typeof tool.name === "string") {
+              this.applyTrims(tool);
+            }
+            if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
+              for (const funcDecl of tool.functionDeclarations) {
+                this.applyTrims(funcDecl);
+              }
+            }
+          }
+        }
+        return tools;
+      }
+      static applyTrims(funcObj) {
+        if (!funcObj || typeof funcObj.name !== "string")
+          return;
+        if (funcObj.name === "execute_command") {
+          funcObj.description = "Execute a CLI command. Chain with &&. Use absolute paths.";
+          if (funcObj.parameters?.properties) {
+            if (funcObj.parameters.properties.command) {
+              funcObj.parameters.properties.command.description = "CLI command to execute. Chain with &&.";
+            }
+            if (funcObj.parameters.properties.requires_approval) {
+              funcObj.parameters.properties.requires_approval.description = "True if destructive, false otherwise.";
+            }
+          }
+        } else if (funcObj.name === "read_file") {
+          funcObj.description = "Read file contents. Uses start_line and end_line. Only for files.";
+        } else if (funcObj.name === "list_files" || funcObj.name === "list_dir") {
+          funcObj.description = "List directory contents.";
+        } else if (funcObj.name === "browser_action") {
+          funcObj.description = "Perform browser automation.";
+        } else if (funcObj.name === "replace_file_content" || funcObj.name === "multi_replace_file_content" || funcObj.name === "edit_file") {
+          funcObj.description = "Edit existing files by specifying target strings and replacements.";
+        }
+      }
+    };
+    exports2.ToolTrimmer = ToolTrimmer;
+  }
+});
+
 // packages/prompt-optimizer/dist/verbosity-steering.js
 var require_verbosity_steering = __commonJS({
   "packages/prompt-optimizer/dist/verbosity-steering.js"(exports2) {
@@ -39808,7 +39862,7 @@ var require_dist11 = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ToolPruner = exports2.PromptOptimizer = exports2.ASTDiffApplier = exports2.ASTDiffer = exports2.CodeChunker = void 0;
+    exports2.ToolTrimmer = exports2.ToolPruner = exports2.PromptOptimizer = exports2.ASTDiffApplier = exports2.ASTDiffer = exports2.CodeChunker = void 0;
     var estimators_1 = require_dist7();
     var code_compressor_1 = require_code_compressor();
     var tool_pruner_1 = require_tool_pruner();
@@ -40041,6 +40095,10 @@ ${JSON.stringify(walk(parsed), null, 2)}
     };
     exports2.PromptOptimizer = PromptOptimizer;
     __exportStar(require_tools2(), exports2);
+    var tool_trimmer_1 = require_tool_trimmer();
+    Object.defineProperty(exports2, "ToolTrimmer", { enumerable: true, get: function() {
+      return tool_trimmer_1.ToolTrimmer;
+    } });
     __exportStar(require_verbosity_steering(), exports2);
   }
 });
@@ -50315,6 +50373,7 @@ var require_dist16 = __commonJS({
     var fastify_1 = __importDefault(require_fastify());
     var fs_1 = __importDefault(require("fs"));
     var os_1 = __importDefault(require("os"));
+    var crypto_1 = require("crypto");
     var core_1 = require_dist();
     var providers_1 = require_dist5();
     var estimators_1 = require_dist7();
@@ -50727,8 +50786,36 @@ ${steeringMsg}`;
         }
       }
     }
+    function isVolatile(text) {
+      if (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text))
+        return true;
+      if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text))
+        return true;
+      if (/\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2} (am|pm)/i.test(text))
+        return true;
+      return false;
+    }
+    function computePrefixHash(body) {
+      let prefixPayload = {};
+      if (body.system)
+        prefixPayload.system = body.system;
+      if (body.tools)
+        prefixPayload.tools = body.tools;
+      if (body.messages) {
+        prefixPayload.messages = [];
+        for (const msg of body.messages) {
+          prefixPayload.messages.push(msg);
+          if (JSON.stringify(msg).includes('"cache_control"')) {
+            break;
+          }
+        }
+      }
+      const hash = (0, crypto_1.createHash)("sha256").update(JSON.stringify(prefixPayload)).digest("hex");
+      console.log(`[TokenWall Gateway] [Prefix Hash] ${hash.substring(0, 8)}... (Full: ${hash})`);
+    }
     function injectAnthropicCacheControl(body) {
       if (JSON.stringify(body).includes('"cache_control"')) {
+        computePrefixHash(body);
         return;
       }
       if (body.system) {
@@ -50749,17 +50836,24 @@ ${steeringMsg}`;
           lastTool.cache_control = { type: "ephemeral" };
         }
       }
-      if (body.messages && Array.isArray(body.messages) && body.messages.length > 3) {
-        const userMessages = body.messages.filter((m) => m.role === "user");
-        if (userMessages.length > 0) {
-          const lastUserMsg = userMessages[userMessages.length - 1];
-          if (lastUserMsg && lastUserMsg.content) {
-            if (typeof lastUserMsg.content === "string") {
-              lastUserMsg.content = [
-                { type: "text", text: lastUserMsg.content, cache_control: { type: "ephemeral" } }
+      if (body.messages && Array.isArray(body.messages) && body.messages.length > 1) {
+        let lastDeterministicIndex = -1;
+        for (let i = 0; i < body.messages.length - 1; i++) {
+          const msgContent = typeof body.messages[i].content === "string" ? body.messages[i].content : JSON.stringify(body.messages[i].content);
+          if (isVolatile(msgContent)) {
+            break;
+          }
+          lastDeterministicIndex = i;
+        }
+        if (lastDeterministicIndex !== -1) {
+          const msgToCache = body.messages[lastDeterministicIndex];
+          if (msgToCache && msgToCache.content) {
+            if (typeof msgToCache.content === "string") {
+              msgToCache.content = [
+                { type: "text", text: msgToCache.content, cache_control: { type: "ephemeral" } }
               ];
-            } else if (Array.isArray(lastUserMsg.content) && lastUserMsg.content.length > 0) {
-              const lastBlock = lastUserMsg.content[lastUserMsg.content.length - 1];
+            } else if (Array.isArray(msgToCache.content) && msgToCache.content.length > 0) {
+              const lastBlock = msgToCache.content[msgToCache.content.length - 1];
               if (typeof lastBlock === "object") {
                 lastBlock.cache_control = { type: "ephemeral" };
               }
@@ -50767,6 +50861,7 @@ ${steeringMsg}`;
           }
         }
       }
+      computePrefixHash(body);
     }
     async function executeUpstreamRequest(provider, targetUrl, headers, requestBody, globalCompressionMap = []) {
       const response = await fetch(targetUrl, {
@@ -50919,7 +51014,7 @@ ${steeringMsg}`;
       }
       return { response, resBody };
     }
-    async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = []) {
+    async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = [], initialResponse = null, hasCCR = false) {
       let inputAccumulated = 0;
       let outputAccumulated = 0;
       let streamFailed = false;
@@ -50927,11 +51022,12 @@ ${steeringMsg}`;
       return new ReadableStream({
         async start(controller) {
           async function runTurn(body) {
-            const response = await fetch(targetUrl, {
+            const response = initialResponse || await fetch(targetUrl, {
               method: "POST",
               headers,
               body: JSON.stringify(body)
             });
+            initialResponse = null;
             if (!response.ok) {
               const errorText = await response.text();
               const err = new Error(`Upstream error: ${response.status} - ${errorText}`);
@@ -51039,6 +51135,7 @@ ${steeringMsg}`;
               }
             });
             const bufferChunks = [];
+            const mustBuffer = hasCCR || globalCompressionMap.length > 0;
             try {
               while (true) {
                 const { done, value } = await reader.read();
@@ -51047,7 +51144,11 @@ ${steeringMsg}`;
                 }
                 const chunkText = decoder.decode(value, { stream: true });
                 parser.feed(chunkText);
-                bufferChunks.push(value);
+                if (mustBuffer) {
+                  bufferChunks.push(value);
+                } else {
+                  controller.enqueue(value);
+                }
               }
             } catch (err) {
               streamFailed = true;
@@ -51145,7 +51246,7 @@ ${steeringMsg}`;
                 if (provider === "gemini" && fullAssistantResponseForTurn?.parts?.some((p) => p.functionCall && (p.functionCall.name === "replace_file_content" || p.functionCall.name === "edit_file" || p.functionCall.name === "multi_replace_file_content")))
                   needsReverseMapping = true;
               }
-              if (needsReverseMapping) {
+              if (needsReverseMapping && mustBuffer) {
                 console.log(`[Stream CCR] Reverse mapping edit tool for request ${requestId}`);
                 const encoder = new TextEncoder();
                 if (provider === "openai") {
@@ -51291,7 +51392,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
 
 `));
                 }
-              } else {
+              } else if (mustBuffer) {
                 for (const chunk of bufferChunks) {
                   controller.enqueue(chunk);
                 }
@@ -51387,8 +51488,11 @@ data: ${JSON.stringify({ type: "message_stop" })}
         let toolPruningSavings = 0;
         try {
           toolPruningSavings = prompt_optimizer_1.ToolPruner.pruneTools(provider, request.body, parsedRequest.model, contextStr);
+          if (request.body.tools) {
+            request.body.tools = prompt_optimizer_1.ToolTrimmer.trim(request.body.tools);
+          }
         } catch (e) {
-          console.error("[TokenWall Gateway] ToolPruner failed:", e.message);
+          console.error("[TokenWall Gateway] Tool pruning/trimming failed:", e.message);
         }
         categorySavings = {
           "JSON crushing": 0,
@@ -51815,10 +51919,23 @@ ${runningTotal.toLocaleString()}`);
           return reply.send(resBody);
         }
         telemetryLogger.emitEvent({ eventType: "provider_stream_started", sessionId, requestId, provider, model: finalRequest.model });
-        reply.header("content-type", "text/event-stream");
-        reply.header("cache-control", "no-cache");
-        reply.header("connection", "keep-alive");
-        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap);
+        const initialResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: forwardHeaders,
+          body: JSON.stringify(finalRequestBody)
+        });
+        if (!initialResponse.ok) {
+          const errorText = await initialResponse.text();
+          telemetryLogger.emitEvent({ eventType: "request_stream_failed", sessionId, requestId, provider, model: finalRequest.model, metadata: { error: errorText } });
+          telemetryLogger.reconcileRequest(requestId, 0, "failed", "failed");
+          telemetryLogger.emitEvent({ eventType: "request_reconciled", sessionId, requestId, metadata: { state: "failed" } });
+          return reply.status(initialResponse.status).send(errorText);
+        }
+        for (const [key, value] of initialResponse.headers.entries()) {
+          reply.header(key, value);
+        }
+        const hasCCR = contextReport.cachedContents && contextReport.cachedContents.length > 0;
+        const stream = await proxyStreamWithCCR(provider, targetUrl, forwardHeaders, finalRequestBody, requestId, sessionId, finalRequest.model, estimation, savedTokens, globalCompressionMap, initialResponse, hasCCR);
         return reply.send(stream);
       } catch (error) {
         const isUpstreamError = error?.message && error.message.includes("Upstream error:");
