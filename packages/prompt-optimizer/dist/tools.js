@@ -1,7 +1,41 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ToolPayloadCrusher = exports.ToolSchemaOptimizer = exports.ToolRouter = void 0;
 const estimators_1 = require("@tokenwall/estimators");
+const crypto = __importStar(require("crypto"));
 // --- Tool Router ---
 class ToolRouter {
     /**
@@ -180,41 +214,70 @@ class ToolPayloadCrusher {
         }
         return [...aggressiveHead, metadataNode];
     }
-    static optimizeToolResult(content, model, outCachedContents = []) {
+    static optimizeToolResult(content, model, outCachedContents = [], sessionId, dedupMap, turnIndex) {
+        // 1. ANSI Escape Code Stripping
+        const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+        const lines = noAnsi.split('\n');
+        // 2. Threshold Check & Deduplication
+        // Critical Note: Do NOT migrate deduplication to an args-based check (e.g. matching tool name + args).
+        // A mutable query like `read_file` can return different content on the same path if the file was edited in between.
+        // Content-based hashing handles this correctly for free and prevents state drift.
+        let contentId = '';
+        if (lines.length > 100 || noAnsi.length > 4000) {
+            if (sessionId && dedupMap && turnIndex !== undefined) {
+                // Compute truncated SHA-256 hash (16 bytes / 32 hex chars) of raw pre-pruned content
+                const hash = crypto.createHash('sha256').update(noAnsi).digest('hex').substring(0, 32);
+                contentId = `ccr_txt_${sessionId}_${hash}`;
+                if (dedupMap.has(hash)) {
+                    const { turnIndex: firstTurn, cacheId } = dedupMap.get(hash);
+                    return `[Tool Output: identical to Message ${firstTurn}, content_id='${cacheId}']`;
+                }
+                else {
+                    dedupMap.set(hash, { turnIndex, cacheId: contentId });
+                }
+            }
+            else {
+                // Fallback random ID if tracking is unavailable
+                contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
+            }
+        }
         // Attempt standard JSON parsing
         try {
             const parsed = JSON.parse(content);
-            return this.processJsonObject(parsed, model);
+            const crushed = this.processJsonObject(parsed, model);
+            if (contentId) {
+                outCachedContents.push({ id: contentId, content: noAnsi });
+            }
+            return crushed;
         }
         catch (e) {
             // Not standard JSON
         }
         // Attempt JSONL parsing
         try {
-            const lines = content.trim().split('\n');
             if (lines.length > 5) {
                 const parsedLines = lines.map(line => JSON.parse(line));
                 // It's valid JSONL! Treat it like an array.
                 const crushed = this.crushArray(parsedLines, 50, 1500, model);
-                return crushed.map(item => typeof item === 'string' && item.startsWith('... [TokenWall') ? item : JSON.stringify(item)).join('\n');
+                const crushedStr = crushed.map(item => typeof item === 'string' && item.startsWith('... [TokenWall') ? item : JSON.stringify(item)).join('\n');
+                if (contentId) {
+                    outCachedContents.push({ id: contentId, content: noAnsi });
+                }
+                return crushedStr;
             }
         }
         catch (e) {
             // Not JSONL
         }
         // --- Raw Text Processing ---
-        // 1. ANSI Escape Code Stripping
-        const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
-        // 2. Threshold Check
-        const lines = noAnsi.split('\n');
-        if (lines.length <= 100 && noAnsi.length <= 4000) {
+        if (!contentId) {
+            // It was below threshold
             return noAnsi; // Use stripped text to save tokens
         }
         // 3. Security Redaction
         const redacted = this.redactText(noAnsi);
         const redactedLines = redacted.split('\n');
         // 4. Cache Full Redacted Text
-        const contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
         outCachedContents.push({ id: contentId, content: redacted });
         // 5. Relevance-Based Pruning
         const highSignalRegex = /fatal|panic|error|exception|fail|traceback|warning/i;

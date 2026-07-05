@@ -25,7 +25,10 @@ export declare class ToolPayloadCrusher {
     static isHomogeneous(arr: any[]): boolean;
     static convertToCSV(arr: any[]): string;
     static crushArray(arr: any[], maxItems: number, maxTokens: number, model: string): any[];
-    static optimizeToolResult(content: string, model: string, outCachedContents?: CachedContent[]): string;
+    static optimizeToolResult(content: string, model: string, outCachedContents?: CachedContent[], sessionId?: string, dedupMap?: Map<string, {
+        turnIndex: number;
+        cacheId: string;
+    }>, turnIndex?: number): string;
     private static processJsonObject;
     private static redactText;
     private static mergeRanges;

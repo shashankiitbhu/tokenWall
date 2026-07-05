@@ -230,9 +230,10 @@ function aggregateCoverage(target, source) {
         }
     }
 }
-async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
+async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
     if (!originalMessages)
         return originalMessages;
+    const toolHashMap = new Map();
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
     for (let i = 0; i < newMessages.length; i++) {
         const origMsg = newMessages[i];
@@ -256,7 +257,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                 }
             }
             else if (cleanMsg.role === 'tool') {
-                newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
+                newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents, sessionId, toolHashMap, i);
             }
         }
         catch (e) {
@@ -293,7 +294,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                 if (b.type === 'tool_result') {
                     if (typeof b.content === 'string') {
                         try {
-                            b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
+                            b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents, sessionId, toolHashMap, i);
                         }
                         catch (e) {
                             console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
@@ -303,7 +304,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                         b.content.forEach((part) => {
                             if (part.type === 'text' && typeof part.text === 'string') {
                                 try {
-                                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
+                                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents, sessionId, toolHashMap, i);
                                 }
                                 catch (e) {
                                     console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
@@ -317,9 +318,10 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
     }
     return newMessages;
 }
-async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
+async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
     if (!originalContents)
         return originalContents;
+    const toolHashMap = new Map();
     const newContents = JSON.parse(JSON.stringify(originalContents));
     for (let i = 0; i < newContents.length; i++) {
         const origContent = newContents[i];
@@ -368,7 +370,7 @@ async function getOptimizedGeminiContents(originalContents, cleanMessages, model
                 if (p.functionResponse && p.functionResponse.response) {
                     try {
                         const responseStr = typeof p.functionResponse.response === 'string' ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
-                        const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+                        const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents, sessionId, toolHashMap, i);
                         try {
                             p.functionResponse.response = JSON.parse(optimizedStr);
                         }
@@ -1483,7 +1485,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
             };
             // Optimize top-level Anthropic system prompt
             if (provider === 'anthropic' && finalRequestBody.system) {
@@ -1515,7 +1517,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
             };
             // Optimize top-level Gemini systemInstruction
             if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {

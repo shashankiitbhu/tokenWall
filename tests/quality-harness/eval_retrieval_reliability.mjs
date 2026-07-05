@@ -4,7 +4,7 @@ import os from 'os';
 os.homedir = () => path.resolve('./.tmp_home');
 process.env.HOME = path.resolve('./.tmp_home');
 import { fileURLToPath } from 'url';
-import { PromptOptimizer } from '../../packages/prompt-optimizer/dist/index.js';
+import { PromptOptimizer, ToolPayloadCrusher } from '../../packages/prompt-optimizer/dist/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -498,7 +498,7 @@ async function main() {
         }
         return { retrievedBeforeAct, correctId, correctFinalEdit };
       }
-,
+    },
     {
       name: "Multi-retrieve (Two masked regions)",
       fn: async (callLLM) => {
@@ -581,7 +581,7 @@ async function main() {
         }
         return { retrievedBeforeAct, correctId, correctFinalEdit };
       }
-,
+    },
     {
       name: "Multi-retrieve (Two masked regions)",
       fn: async (callLLM) => {
@@ -660,6 +660,58 @@ async function main() {
               if (res3.message.content && res3.message.content.includes('token_12345') && res3.message.content.includes('8080')) {
                   correctFinalEdit = true;
               }
+          }
+        }
+        return { retrievedBeforeAct, correctId, correctFinalEdit };
+      }
+    },
+    {
+      name: "Tool Output Deduplication (Round-trip)",
+      fn: async (callLLM) => {
+        const rawContent = `{\n  "large_data_block": [\n` + `    "repeated_item",\n`.repeat(250) + `  ]\n}`;
+        const outCached = [];
+        const dedupMap = new Map();
+        const sessionId = "test_sess_1";
+
+        const turn1Output = ToolPayloadCrusher.optimizeToolResult(rawContent, 'gpt-4', outCached, sessionId, dedupMap, 1);
+        const turn2Output = ToolPayloadCrusher.optimizeToolResult(rawContent, 'gpt-4', outCached, sessionId, dedupMap, 2);
+
+        if (!turn2Output.includes("identical to Message 1")) {
+            throw new Error("Deduplication failed to truncate repeating content");
+        }
+        
+        const contentIdMatch = turn2Output.match(/content_id='([^']+)'/);
+        if (!contentIdMatch) throw new Error("Could not extract content_id from dedup pointer");
+        const targetId = contentIdMatch[1];
+        
+        let messages = [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: `Here is the first tool result:\n\n${turn1Output}\n\nHere is the second tool result:\n\n${turn2Output}\n\nPlease fetch the second tool result and output how many times 'repeated_item' appears in the array.` }
+        ];
+
+        let retrievedBeforeAct = false;
+        let correctId = false;
+        let correctFinalEdit = false;
+
+        const res1 = await callLLM(messages, [RETRIEVE_TOOL]);
+        if (res1.message.tool_calls?.[0]?.function?.name === 'tokenwall_retrieve_content') {
+          retrievedBeforeAct = true;
+          const args = JSON.parse(res1.message.tool_calls[0].function.arguments);
+          if (args.content_id === targetId) {
+            correctId = true;
+            
+            const retrievedContent = outCached.find(c => c.id === targetId)?.content;
+            if (retrievedContent !== rawContent) {
+                throw new Error("Retrieved content does not perfectly match original raw content!");
+            }
+            
+            messages.push(res1.message);
+            messages.push({ role: 'tool', name: 'tokenwall_retrieve_content', tool_call_id: res1.message.tool_calls[0].id, content: retrievedContent });
+
+            const res2 = await callLLM(messages, []);
+            if (res2.message.content && res2.message.content.includes('250')) {
+              correctFinalEdit = true;
+            }
           }
         }
         return { retrievedBeforeAct, correctId, correctFinalEdit };

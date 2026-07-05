@@ -39233,9 +39233,47 @@ ${sparsified}
 var require_tools2 = __commonJS({
   "packages/prompt-optimizer/dist/tools.js"(exports2) {
     "use strict";
+    var __createBinding = exports2 && exports2.__createBinding || (Object.create ? (function(o, m, k, k2) {
+      if (k2 === void 0) k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
+    }) : (function(o, m, k, k2) {
+      if (k2 === void 0) k2 = k;
+      o[k2] = m[k];
+    }));
+    var __setModuleDefault = exports2 && exports2.__setModuleDefault || (Object.create ? (function(o, v) {
+      Object.defineProperty(o, "default", { enumerable: true, value: v });
+    }) : function(o, v) {
+      o["default"] = v;
+    });
+    var __importStar = exports2 && exports2.__importStar || /* @__PURE__ */ (function() {
+      var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function(o2) {
+          var ar = [];
+          for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
+          return ar;
+        };
+        return ownKeys(o);
+      };
+      return function(mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) {
+          for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        }
+        __setModuleDefault(result, mod);
+        return result;
+      };
+    })();
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ToolPayloadCrusher = exports2.ToolSchemaOptimizer = exports2.ToolRouter = void 0;
     var estimators_1 = require_dist7();
+    var crypto = __importStar(require("crypto"));
     var ToolRouter = class {
       /**
        * Drops irrelevant tools if the number of tools exceeds a threshold (e.g. 15).
@@ -39395,29 +39433,50 @@ var require_tools2 = __commonJS({
         }
         return [...aggressiveHead, metadataNode];
       }
-      static optimizeToolResult(content, model, outCachedContents = []) {
+      static optimizeToolResult(content, model, outCachedContents = [], sessionId, dedupMap, turnIndex) {
+        const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+        const lines = noAnsi.split("\n");
+        let contentId = "";
+        if (lines.length > 100 || noAnsi.length > 4e3) {
+          if (sessionId && dedupMap && turnIndex !== void 0) {
+            const hash = crypto.createHash("sha256").update(noAnsi).digest("hex").substring(0, 32);
+            contentId = `ccr_txt_${sessionId}_${hash}`;
+            if (dedupMap.has(hash)) {
+              const { turnIndex: firstTurn, cacheId } = dedupMap.get(hash);
+              return `[Tool Output: identical to Message ${firstTurn}, content_id='${cacheId}']`;
+            } else {
+              dedupMap.set(hash, { turnIndex, cacheId: contentId });
+            }
+          } else {
+            contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
+          }
+        }
         try {
           const parsed = JSON.parse(content);
-          return this.processJsonObject(parsed, model);
+          const crushed = this.processJsonObject(parsed, model);
+          if (contentId) {
+            outCachedContents.push({ id: contentId, content: noAnsi });
+          }
+          return crushed;
         } catch (e) {
         }
         try {
-          const lines2 = content.trim().split("\n");
-          if (lines2.length > 5) {
-            const parsedLines = lines2.map((line) => JSON.parse(line));
+          if (lines.length > 5) {
+            const parsedLines = lines.map((line) => JSON.parse(line));
             const crushed = this.crushArray(parsedLines, 50, 1500, model);
-            return crushed.map((item) => typeof item === "string" && item.startsWith("... [TokenWall") ? item : JSON.stringify(item)).join("\n");
+            const crushedStr = crushed.map((item) => typeof item === "string" && item.startsWith("... [TokenWall") ? item : JSON.stringify(item)).join("\n");
+            if (contentId) {
+              outCachedContents.push({ id: contentId, content: noAnsi });
+            }
+            return crushedStr;
           }
         } catch (e) {
         }
-        const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
-        const lines = noAnsi.split("\n");
-        if (lines.length <= 100 && noAnsi.length <= 4e3) {
+        if (!contentId) {
           return noAnsi;
         }
         const redacted = this.redactText(noAnsi);
         const redactedLines = redacted.split("\n");
-        const contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
         outCachedContents.push({ id: contentId, content: redacted });
         const highSignalRegex = /fatal|panic|error|exception|fail|traceback|warning/i;
         const matches = [];
@@ -50618,9 +50677,10 @@ var require_dist16 = __commonJS({
         }
       }
     }
-    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
+    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
       if (!originalMessages)
         return originalMessages;
+      const toolHashMap = /* @__PURE__ */ new Map();
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
       for (let i = 0; i < newMessages.length; i++) {
         const origMsg = newMessages[i];
@@ -50643,7 +50703,7 @@ var require_dist16 = __commonJS({
               outCompressionMap.push(...opt.compressionMap);
             }
           } else if (cleanMsg.role === "tool") {
-            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
+            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents, sessionId, toolHashMap, i);
           }
         } catch (e) {
           console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
@@ -50676,7 +50736,7 @@ var require_dist16 = __commonJS({
             if (b.type === "tool_result") {
               if (typeof b.content === "string") {
                 try {
-                  b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
+                  b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents, sessionId, toolHashMap, i);
                 } catch (e) {
                   console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
                 }
@@ -50684,7 +50744,7 @@ var require_dist16 = __commonJS({
                 b.content.forEach((part) => {
                   if (part.type === "text" && typeof part.text === "string") {
                     try {
-                      part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
+                      part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents, sessionId, toolHashMap, i);
                     } catch (e) {
                       console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
                     }
@@ -50697,9 +50757,10 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
+    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx, sessionId) {
       if (!originalContents)
         return originalContents;
+      const toolHashMap = /* @__PURE__ */ new Map();
       const newContents = JSON.parse(JSON.stringify(originalContents));
       for (let i = 0; i < newContents.length; i++) {
         const origContent = newContents[i];
@@ -50745,7 +50806,7 @@ var require_dist16 = __commonJS({
             if (p.functionResponse && p.functionResponse.response) {
               try {
                 const responseStr = typeof p.functionResponse.response === "string" ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
-                const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+                const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents, sessionId, toolHashMap, i);
                 try {
                   p.functionResponse.response = JSON.parse(optimizedStr);
                 } catch (e) {
@@ -51812,7 +51873,7 @@ ${runningTotal.toLocaleString()}`);
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
@@ -51841,7 +51902,7 @@ ${runningTotal.toLocaleString()}`);
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
           };
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
             for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {

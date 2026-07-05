@@ -260,9 +260,11 @@ async function getOptimizedMessages(
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null,
   outCompressionMap: any[] = [],
-  lastUserIdx?: number
+  lastUserIdx?: number,
+  sessionId?: string
 ): Promise<any[]> {
   if (!originalMessages) return originalMessages;
+  const toolHashMap = new Map<string, { turnIndex: number, cacheId: string }>();
   const newMessages = JSON.parse(JSON.stringify(originalMessages));
   for (let i = 0; i < newMessages.length; i++) {
     const origMsg = newMessages[i];
@@ -286,7 +288,7 @@ async function getOptimizedMessages(
           outCompressionMap.push(...opt.compressionMap);
         }
       } else if (cleanMsg.role === 'tool') {
-        newText = ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
+        newText = ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents, sessionId, toolHashMap, i);
       }
     } catch (e: any) {
       console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
@@ -322,7 +324,7 @@ async function getOptimizedMessages(
         if (b.type === 'tool_result') {
           if (typeof b.content === 'string') {
             try {
-              b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
+              b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents, sessionId, toolHashMap, i);
             } catch (e) {
               console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
             }
@@ -330,7 +332,7 @@ async function getOptimizedMessages(
             b.content.forEach((part: any) => {
               if (part.type === 'text' && typeof part.text === 'string') {
                 try {
-                  part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
+                  part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents, sessionId, toolHashMap, i);
                 } catch (e) {
                   console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
                 }
@@ -353,9 +355,11 @@ async function getOptimizedGeminiContents(
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null,
   outCompressionMap: any[] = [],
-  lastUserIdx?: number
+  lastUserIdx?: number,
+  sessionId?: string
 ): Promise<any[]> {
   if (!originalContents) return originalContents;
+  const toolHashMap = new Map<string, { turnIndex: number, cacheId: string }>();
   const newContents = JSON.parse(JSON.stringify(originalContents));
   for (let i = 0; i < newContents.length; i++) {
     const origContent = newContents[i];
@@ -404,7 +408,7 @@ async function getOptimizedGeminiContents(
         if (p.functionResponse && p.functionResponse.response) {
           try {
             const responseStr = typeof p.functionResponse.response === 'string' ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
-            const optimizedStr = ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+            const optimizedStr = ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents, sessionId, toolHashMap, i);
             try {
               p.functionResponse.response = JSON.parse(optimizedStr);
             } catch (e) {
@@ -1556,7 +1560,7 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
       };
       
       // Optimize top-level Anthropic system prompt
@@ -1582,7 +1586,7 @@ async function handleInterception(
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
+        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
       };
       
       // Optimize top-level Gemini systemInstruction
