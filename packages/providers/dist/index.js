@@ -176,7 +176,9 @@ class ProviderRegistry {
                 else if (parsed.type === 'message_start') {
                     usage = {
                         inputTokens: parsed.message?.usage?.input_tokens || 0,
-                        outputTokens: parsed.message?.usage?.output_tokens || 0
+                        outputTokens: parsed.message?.usage?.output_tokens || 0,
+                        cacheCreationTokens: parsed.message?.usage?.cache_creation_input_tokens || 0,
+                        cacheReadTokens: parsed.message?.usage?.cache_read_input_tokens || 0
                     };
                 }
                 else if (parsed.type === 'message_delta') {

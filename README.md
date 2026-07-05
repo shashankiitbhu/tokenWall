@@ -32,9 +32,11 @@ TokenWall sits between your local development terminal and the upstream model AP
 - **Dynamic Tool Pruning & Trimming**: Automatically reduces tool schema bloat (which often consumes 4,000+ tokens per request) via two mechanisms:
   - *Pruning*: Safely drops domain-specific tools (like `browser_action`, `execute_command`, `sql_query`) if the user's prompt shows zero intent for web browsing, bash execution, or database queries.
   - *Trimming*: Manually compresses verbose tool `description` strings (for `read_file`, `execute_command`, etc.) while strictly preserving delicate property rules (e.g., `@workspace:path` syntax) to prevent agent amnesia.
-- **Prefix Cache Determinism**: Intercepts payloads to guarantee maximum prompt caching hits for providers like Anthropic.
+- **Prefix Cache Determinism & Telemetry**: Intercepts payloads to guarantee maximum prompt caching hits for providers like Anthropic and surfaces exact cache diagnostics.
   - Dynamically calculates the "largest deterministic prefix" by scanning historical message payloads for volatile entropy (UUIDs, timestamps) and placing the `cache_control` breakpoint on the last safe message.
+  - Strictly enforces structural cache constraints (`tools` → `system` → `messages`) and eliminates client JSON key entropy by serializing outbound payloads with a custom `fast-json-stable-stringify` engine.
   - Computes and logs a SHA-256 hash of the stabilized prefix to provide instant observability into cache behavior.
+  - Hooks into Anthropic's `message_start` events to pluck explicit `cache_creation_input_tokens` and `cache_read_input_tokens`, tracking cache hit effectiveness natively within TokenWall telemetry.
   - *Future Roadmap*: Aggressive Contextual Pruning (dropping state-mutating tools when just chatting), Static Configuration (blacklisting via `tokenwall.json`), and ML-based Speculative Tool Prediction.
 - **System Prompt Semantic Compression**: Intercepts massive system prompts (including agent definitions, tool lists, skills, and Claude API triggers/skips) and compresses them by up to 75% without losing their functional instructions, constraints, or configurations.
 - **System Message & Prompt Optimization**: Runs the prompt optimizer on all OpenAI system messages (`role === "system"`), Anthropic top-level `system` prompts, and Gemini `systemInstruction` parts in addition to standard user messages.

@@ -178,7 +178,7 @@ export class ProviderRegistry {
     throw new Error(`Unsupported provider: ${provider}`);
   }
 
-  static parseStreamChunk(provider: 'openai' | 'anthropic' | 'gemini', chunkText: string): { text: string; usage?: { inputTokens: number; outputTokens: number } } | null {
+  static parseStreamChunk(provider: 'openai' | 'anthropic' | 'gemini', chunkText: string): { text: string; usage?: { inputTokens: number; outputTokens: number; cacheCreationTokens?: number; cacheReadTokens?: number } } | null {
     try {
       if (provider === 'openai') {
         const jsonStr = chunkText.trim();
@@ -208,7 +208,9 @@ export class ProviderRegistry {
         } else if (parsed.type === 'message_start') {
           usage = {
             inputTokens: parsed.message?.usage?.input_tokens || 0,
-            outputTokens: parsed.message?.usage?.output_tokens || 0
+            outputTokens: parsed.message?.usage?.output_tokens || 0,
+            cacheCreationTokens: parsed.message?.usage?.cache_creation_input_tokens || 0,
+            cacheReadTokens: parsed.message?.usage?.cache_read_input_tokens || 0
           };
         } else if (parsed.type === 'message_delta') {
           usage = {

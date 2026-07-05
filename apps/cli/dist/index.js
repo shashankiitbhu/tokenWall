@@ -34752,7 +34752,9 @@ var require_dist5 = __commonJS({
             } else if (parsed.type === "message_start") {
               usage = {
                 inputTokens: parsed.message?.usage?.input_tokens || 0,
-                outputTokens: parsed.message?.usage?.output_tokens || 0
+                outputTokens: parsed.message?.usage?.output_tokens || 0,
+                cacheCreationTokens: parsed.message?.usage?.cache_creation_input_tokens || 0,
+                cacheReadTokens: parsed.message?.usage?.cache_read_input_tokens || 0
               };
             } else if (parsed.type === "message_delta") {
               usage = {
@@ -50239,6 +50241,62 @@ var require_static = __commonJS({
   }
 });
 
+// node_modules/fast-json-stable-stringify/index.js
+var require_fast_json_stable_stringify = __commonJS({
+  "node_modules/fast-json-stable-stringify/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = function(data, opts) {
+      if (!opts) opts = {};
+      if (typeof opts === "function") opts = { cmp: opts };
+      var cycles = typeof opts.cycles === "boolean" ? opts.cycles : false;
+      var cmp = opts.cmp && /* @__PURE__ */ (function(f) {
+        return function(node) {
+          return function(a, b) {
+            var aobj = { key: a, value: node[a] };
+            var bobj = { key: b, value: node[b] };
+            return f(aobj, bobj);
+          };
+        };
+      })(opts.cmp);
+      var seen = [];
+      return (function stringify(node) {
+        if (node && node.toJSON && typeof node.toJSON === "function") {
+          node = node.toJSON();
+        }
+        if (node === void 0) return;
+        if (typeof node == "number") return isFinite(node) ? "" + node : "null";
+        if (typeof node !== "object") return JSON.stringify(node);
+        var i, out;
+        if (Array.isArray(node)) {
+          out = "[";
+          for (i = 0; i < node.length; i++) {
+            if (i) out += ",";
+            out += stringify(node[i]) || "null";
+          }
+          return out + "]";
+        }
+        if (node === null) return "null";
+        if (seen.indexOf(node) !== -1) {
+          if (cycles) return JSON.stringify("__cycle__");
+          throw new TypeError("Converting circular structure to JSON");
+        }
+        var seenIndex = seen.push(node) - 1;
+        var keys = Object.keys(node).sort(cmp && cmp(node));
+        out = "";
+        for (i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          var value = stringify(node[key]);
+          if (!value) continue;
+          if (out) out += ",";
+          out += JSON.stringify(key) + ":" + value;
+        }
+        seen.splice(seenIndex, 1);
+        return "{" + out + "}";
+      })(data);
+    };
+  }
+});
+
 // apps/gateway/dist/control-plane.js
 var require_control_plane = __commonJS({
   "apps/gateway/dist/control-plane.js"(exports2) {
@@ -50388,7 +50446,27 @@ var require_dist16 = __commonJS({
     var cors_1 = __importDefault(require_cors());
     var static_1 = __importDefault(require_static());
     var path_1 = __importDefault(require("path"));
+    var fast_json_stable_stringify_1 = __importDefault(require_fast_json_stable_stringify());
     var control_plane_js_1 = require_control_plane();
+    var topLevelOrder = {
+      tools: 1,
+      system: 2,
+      messages: 3
+    };
+    function stableSerialize(obj) {
+      return (0, fast_json_stable_stringify_1.default)(obj, {
+        cmp: (a, b) => {
+          if (topLevelOrder[a.key] && topLevelOrder[b.key]) {
+            return topLevelOrder[a.key] - topLevelOrder[b.key];
+          }
+          if (topLevelOrder[a.key])
+            return -1;
+          if (topLevelOrder[b.key])
+            return 1;
+          return a.key > b.key ? 1 : -1;
+        }
+      });
+    }
     var server = (0, fastify_1.default)({ logger: false });
     server.register(cors_1.default, { origin: "*" });
     server.register(websocket_1.default);
@@ -51017,6 +51095,8 @@ ${steeringMsg}`;
     async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = [], initialResponse = null, hasCCR = false) {
       let inputAccumulated = 0;
       let outputAccumulated = 0;
+      let cacheCreationAccumulated = 0;
+      let cacheReadAccumulated = 0;
       let streamFailed = false;
       let streamCancelled = false;
       return new ReadableStream({
@@ -51054,6 +51134,10 @@ ${steeringMsg}`;
                     inputAccumulated = parsedChunk.usage.inputTokens;
                   if (parsedChunk.usage.outputTokens > 0)
                     outputAccumulated = parsedChunk.usage.outputTokens;
+                  if (parsedChunk.usage.cacheCreationTokens > 0)
+                    cacheCreationAccumulated = parsedChunk.usage.cacheCreationTokens;
+                  if (parsedChunk.usage.cacheReadTokens > 0)
+                    cacheReadAccumulated = parsedChunk.usage.cacheReadTokens;
                 }
                 if (provider === "openai") {
                   try {
@@ -51414,7 +51498,7 @@ data: ${JSON.stringify({ type: "message_stop" })}
               outputAccumulated = estimation.estimatedOutputTokens;
             const pricing = (0, estimators_1.getPricingForModel)(finalModel);
             const finalCost = inputAccumulated / 1e6 * pricing.inputPerMillion + outputAccumulated / 1e6 * pricing.outputPerMillion;
-            telemetryLogger.emitEvent({ eventType: "provider_usage_received", sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
+            telemetryLogger.emitEvent({ eventType: "provider_usage_received", sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated, cacheCreationTokens: cacheCreationAccumulated, cacheReadTokens: cacheReadAccumulated } } });
             db2.updateRequestTokens(requestId, inputAccumulated, outputAccumulated, savedTokens);
             const status = streamFailed ? "failed" : "success";
             const state = streamFailed ? "failed" : streamCancelled ? "cancelled" : "reconciled";
@@ -51922,7 +52006,7 @@ ${runningTotal.toLocaleString()}`);
         const initialResponse = await fetch(targetUrl, {
           method: "POST",
           headers: forwardHeaders,
-          body: JSON.stringify(finalRequestBody)
+          body: stableSerialize(finalRequestBody)
         });
         if (!initialResponse.ok) {
           const errorText = await initialResponse.text();

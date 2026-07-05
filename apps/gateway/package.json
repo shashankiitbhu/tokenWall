@@ -21,6 +21,7 @@
     "@tokenwall/telemetry": "file:../../packages/telemetry",
     "@tokenwall/terminal-ui": "file:../../packages/terminal-ui",
     "eventsource-parser": "^3.1.0",
+    "fast-json-stable-stringify": "^2.1.0",
     "fastify": "^4.25.0"
   }
 }

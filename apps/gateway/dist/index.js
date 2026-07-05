@@ -21,7 +21,28 @@ const websocket_1 = __importDefault(require("@fastify/websocket"));
 const cors_1 = __importDefault(require("@fastify/cors"));
 const static_1 = __importDefault(require("@fastify/static"));
 const path_1 = __importDefault(require("path"));
+const fast_json_stable_stringify_1 = __importDefault(require("fast-json-stable-stringify"));
 const control_plane_js_1 = require("./control-plane.js");
+const topLevelOrder = {
+    tools: 1,
+    system: 2,
+    messages: 3,
+};
+function stableSerialize(obj) {
+    // @ts-ignore
+    return (0, fast_json_stable_stringify_1.default)(obj, {
+        cmp: (a, b) => {
+            if (topLevelOrder[a.key] && topLevelOrder[b.key]) {
+                return topLevelOrder[a.key] - topLevelOrder[b.key];
+            }
+            if (topLevelOrder[a.key])
+                return -1;
+            if (topLevelOrder[b.key])
+                return 1;
+            return a.key > b.key ? 1 : -1;
+        }
+    });
+}
 const server = (0, fastify_1.default)({ logger: false });
 server.register(cors_1.default, { origin: '*' });
 server.register(websocket_1.default);
@@ -719,6 +740,8 @@ async function executeUpstreamRequest(provider, targetUrl, headers, requestBody,
 async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, requestId, sessionId, finalModel, estimation, savedTokens, globalCompressionMap = [], initialResponse = null, hasCCR = false) {
     let inputAccumulated = 0;
     let outputAccumulated = 0;
+    let cacheCreationAccumulated = 0;
+    let cacheReadAccumulated = 0;
     let streamFailed = false;
     let streamCancelled = false;
     return new ReadableStream({
@@ -756,6 +779,10 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                                 inputAccumulated = parsedChunk.usage.inputTokens;
                             if (parsedChunk.usage.outputTokens > 0)
                                 outputAccumulated = parsedChunk.usage.outputTokens;
+                            if (parsedChunk.usage.cacheCreationTokens > 0)
+                                cacheCreationAccumulated = parsedChunk.usage.cacheCreationTokens;
+                            if (parsedChunk.usage.cacheReadTokens > 0)
+                                cacheReadAccumulated = parsedChunk.usage.cacheReadTokens;
                         }
                         if (provider === 'openai') {
                             try {
@@ -1109,7 +1136,7 @@ async function proxyStreamWithCCR(provider, targetUrl, headers, requestBody, req
                 const pricing = (0, estimators_1.getPricingForModel)(finalModel);
                 const finalCost = ((inputAccumulated / 1000000) * pricing.inputPerMillion) +
                     ((outputAccumulated / 1000000) * pricing.outputPerMillion);
-                telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated } } });
+                telemetryLogger.emitEvent({ eventType: 'provider_usage_received', sessionId, requestId, metadata: { usage: { inputTokens: inputAccumulated, outputTokens: outputAccumulated, cacheCreationTokens: cacheCreationAccumulated, cacheReadTokens: cacheReadAccumulated } } });
                 db.updateRequestTokens(requestId, inputAccumulated, outputAccumulated, savedTokens);
                 const status = streamFailed ? 'failed' : 'success';
                 const state = streamFailed ? 'failed' : (streamCancelled ? 'cancelled' : 'reconciled');
@@ -1673,7 +1700,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         const initialResponse = await fetch(targetUrl, {
             method: 'POST',
             headers: forwardHeaders,
-            body: JSON.stringify(finalRequestBody)
+            body: stableSerialize(finalRequestBody)
         });
         if (!initialResponse.ok) {
             const errorText = await initialResponse.text();

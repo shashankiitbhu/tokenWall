@@ -31,6 +31,8 @@ export declare class ProviderRegistry {
         usage?: {
             inputTokens: number;
             outputTokens: number;
+            cacheCreationTokens?: number;
+            cacheReadTokens?: number;
         };
     } | null;
 }
