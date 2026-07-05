@@ -36,8 +36,8 @@
 
 ## 2. Medium Priority
 - `[x]` **Lost-in-the-middle mitigation**
-- `[ ]` **Template diffing**
-- `[ ]` **Hierarchical summarization**
+- `[x]` **Template diffing** (Structural AST Diffing / GumTree for write-path mapping)
+- `[x]` **Hierarchical summarization** (addressed via Observation Masking/Demand Paging)
 - `[x]` **AST-aware chunking (full function/class-boundary chunking)**
 
 ## 3. Lower Priority

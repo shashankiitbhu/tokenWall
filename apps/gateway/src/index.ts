@@ -5,9 +5,9 @@ import { DBManager, ConfigManager, TokenWallConfig } from '@tokenwall/core';
 import { ProviderRegistry, NormalizedRequest, NormalizedResponse } from '@tokenwall/providers';
 import { calculatePreFlightEstimation, getPricingForModel, countTokens, TokenAttributionAnalyzer } from '@tokenwall/estimators';
 import { BudgetEvaluator, RunawayLoopDetector } from '@tokenwall/budget-engine';
-import { ContextAnalyzer } from '@tokenwall/context-engine';
+import { ContextAnalyzer, ContextReport } from '@tokenwall/context-engine';
 import { ModelRouter } from '@tokenwall/routing-engine';
-import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter, ToolPruner, VerbositySteering } from '@tokenwall/prompt-optimizer';
+import { PromptOptimizer, ToolSchemaOptimizer, ToolPayloadCrusher, ToolRouter, ToolPruner, VerbositySteering, ASTDiffer } from '@tokenwall/prompt-optimizer';
 import { TelemetryLogger } from '@tokenwall/telemetry';
 import { TerminalUI, c } from '@tokenwall/terminal-ui';
 import { createParser } from 'eventsource-parser';
@@ -165,9 +165,26 @@ function countGeminiContentsTokens(contents: any[], model: string): number {
 function applyReverseMapping(targetContent: string, replacementContent: string, compressionMap: any[]): { target: string, replacement: string } {
   if (!compressionMap || compressionMap.length === 0) return { target: targetContent, replacement: replacementContent };
   for (const entry of compressionMap) {
-    const { original, compressed } = entry;
+    const { original, compressed, mappings } = entry;
     const idx = compressed.indexOf(targetContent);
     if (idx !== -1) {
+      if (mappings && mappings.length > 0) {
+        try {
+          const { target, replacement, verified } = ASTDiffer.runASTDiff(
+            original,
+            compressed,
+            targetContent,
+            replacementContent,
+            mappings
+          );
+          if (verified) {
+            return { target, replacement };
+          }
+        } catch (e) {
+          console.error("[TokenWall Gateway] ASTDiffer failed, falling back to line mapping", e);
+        }
+      }
+
       const prefix = compressed.substring(0, idx);
       const startLine = prefix.split('\n').length - 1;
       const endLine = startLine + targetContent.split('\n').length - 1;

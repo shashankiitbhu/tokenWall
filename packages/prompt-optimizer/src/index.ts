@@ -1,6 +1,8 @@
 import { countTokens } from '@tokenwall/estimators';
 import { CodeCompressor, CachedContent } from './code-compressor';
 import { ToolPruner } from './tool-pruner';
+export { CodeChunker } from './code-chunker';
+export { ASTDiffer, ASTDiffApplier } from './ast-differ';
 
 export interface CoverageMetrics {
   json: {

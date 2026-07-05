@@ -18,9 +18,16 @@ export interface CachedContent {
   content: string;
 }
 
+export interface CompressionMapping {
+  originalStart: number;
+  originalEnd: number;
+  replaceWith: string;
+}
+
 export interface CompressionMapEntry {
   original: string;
   compressed: string;
+  mappings?: CompressionMapping[];
 }
 
 export interface Chunk {
@@ -87,10 +94,10 @@ export class CodeCompressor {
 
     let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
       try {
-        const { sparsified, chunks, scopeTree } = this.sparsifyCode(code, lang, cachedContents);
+        const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, lang, cachedContents);
         if (metrics) metrics.code.successfullyOptimized++;
         if (sparsified !== code) {
-          compressionMap.push({ original: code, compressed: sparsified });
+          compressionMap.push({ original: code, compressed: sparsified, mappings });
         }
         if (chunks.length > 0 && scopeTree) {
           chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2,9)}`, language: lang, chunks, scopeTree });
@@ -108,10 +115,10 @@ export class CodeCompressor {
 
     optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
       try {
-        const { sparsified, chunks, scopeTree } = this.sparsifyCode(code, ext, cachedContents);
+        const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, ext, cachedContents);
         if (metrics) metrics.code.successfullyOptimized++;
         if (sparsified !== code) {
-          compressionMap.push({ original: code, compressed: sparsified });
+          compressionMap.push({ original: code, compressed: sparsified, mappings });
         }
         if (chunks.length > 0 && scopeTree) {
           chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2,9)}`, language: ext, chunks, scopeTree });
@@ -133,7 +140,7 @@ export class CodeCompressor {
   /**
    * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
    */
-  private static sparsifyCode(code: string, langOrExt: string, cachedContents: CachedContent[]): { sparsified: string, chunks: Chunk[], scopeTree: ScopeNode | null } {
+  private static sparsifyCode(code: string, langOrExt: string, cachedContents: CachedContent[]): { sparsified: string, chunks: Chunk[], scopeTree: ScopeNode | null, mappings: CompressionMapping[] } {
     const ext = langOrExt.toLowerCase();
     let parser: Parser;
     if (ext === 'javascript' || ext === 'js') {
@@ -205,10 +212,10 @@ export class CodeCompressor {
         console.error("[TokenWall CodeCompressor] CodeChunker failed:", ce);
       }
       
-      return { sparsified, chunks, scopeTree };
-    } catch (e) {
-      console.error("[TokenWall CodeCompressor] Tree-sitter parsing failed:", e);
-      return { sparsified: code, chunks: [], scopeTree: null };
+      return { sparsified, chunks, scopeTree, mappings: removeNodes.map(n => ({ originalStart: n.startIndex, originalEnd: n.endIndex, replaceWith: n.replaceWith || '' })) };
+    } catch (e: any) {
+      // If parsing fails, return original
+      return { sparsified: code, chunks: [], scopeTree: null, mappings: [] };
     }
   }
 }

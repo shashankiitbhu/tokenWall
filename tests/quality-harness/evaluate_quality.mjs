@@ -174,13 +174,9 @@ async function runEvaluation() {
       importance: { policy: 'balanced' }
     });
 
-    const hasEditTools = rawRequest.tools && rawRequest.tools.some(t => 
-      ['replace_file_content', 'insert_at_line', 'edit_file', 'write_to_file', 'apply_diff'].includes(t.function.name)
-    );
-
     const optimizedMessages = analyzerReport.cleanMessages.map(m => ({
       role: m.role,
-      content: optimizer.optimize(m.content, TARGET_MODEL, { disableCodeCompression: hasEditTools }).optimizedText
+      content: optimizer.optimize(m.content, TARGET_MODEL, { disableCodeCompression: false }).optimizedText
     }));
 
     // 2. Query target model with OPTIMIZED payload
