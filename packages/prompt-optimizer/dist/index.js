@@ -240,6 +240,16 @@ class PromptOptimizer {
         for (const item of CONVERSATIONAL_FILLERS) {
             optimized = optimized.replace(item.pattern, item.replacement);
         }
+        if (options?.isHistorical) {
+            // Strip volatile sub-sections from historical environment details
+            optimized = optimized.replace(/# Visual Studio Code Visible Files\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+            optimized = optimized.replace(/# Visual Studio Code Open Tabs\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+            optimized = optimized.replace(/# Current Time\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+            optimized = optimized.replace(/# Context Window Usage\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+            optimized = optimized.replace(/# Current Mode\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+            // Strip task_progress boilerplate
+            optimized = optimized.replace(/# task_progress List \(Optional - Plan Mode\)[\s\S]*?ensures nothing is missed\./gi, '');
+        }
         // Clean up double spaces left over from replacements without destroying newlines
         // WARNING: Do NOT use `/ {2,}/g` to strip spaces, as it destroys code/XML indentation and causes LLM token bloat!
         // Collapse 3+ newlines into double newlines to save tokens without losing paragraph structure

@@ -34663,7 +34663,7 @@ var require_dist5 = __commonJS({
           const messages = [];
           for (const content of contents) {
             const role = content.role === "model" ? "assistant" : "user";
-            const partsText = (content.parts || []).map((p) => p.text || "").join("\n");
+            const partsText = (content.parts || []).map((p) => p.text || "").filter(Boolean).join("\n");
             messages.push({ role, content: partsText });
           }
           const systemInstruction = body.systemInstruction ? JSON.stringify(body.systemInstruction) : void 0;
@@ -40014,6 +40014,14 @@ ${JSON.stringify(walk(parsed), null, 2)}
         optimized = deduplicateContext(optimized);
         for (const item of CONVERSATIONAL_FILLERS) {
           optimized = optimized.replace(item.pattern, item.replacement);
+        }
+        if (options?.isHistorical) {
+          optimized = optimized.replace(/# Visual Studio Code Visible Files\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, "");
+          optimized = optimized.replace(/# Visual Studio Code Open Tabs\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, "");
+          optimized = optimized.replace(/# Current Time\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, "");
+          optimized = optimized.replace(/# Context Window Usage\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, "");
+          optimized = optimized.replace(/# Current Mode\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, "");
+          optimized = optimized.replace(/# task_progress List \(Optional - Plan Mode\)[\s\S]*?ensures nothing is missed\./gi, "");
         }
         optimized = optimized.replace(/\n{3,}/g, "\n\n").trim();
         const optimizedTokens = (0, estimators_1.countTokens)(optimized, model);
@@ -50473,7 +50481,7 @@ var require_dist16 = __commonJS({
         }
       }
     }
-    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
+    async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
       if (!originalMessages)
         return originalMessages;
       const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -50483,9 +50491,10 @@ var require_dist16 = __commonJS({
         if (!cleanMsg)
           continue;
         let newText = cleanMsg.content;
+        const isHistorical = lastUserIdx !== void 0 && cleanMsg.role === "user" && i < lastUserIdx;
         try {
           if (cleanMsg.role === "user" || cleanMsg.role === "system") {
-            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null, isHistorical });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
@@ -50551,7 +50560,7 @@ var require_dist16 = __commonJS({
       }
       return newMessages;
     }
-    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
+    async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
       if (!originalContents)
         return originalContents;
       const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -50561,9 +50570,10 @@ var require_dist16 = __commonJS({
         if (!cleanMsg)
           continue;
         let newText = cleanMsg.content;
+        const isHistorical = lastUserIdx !== void 0 && cleanMsg.role === "user" && i < lastUserIdx;
         if (cleanMsg.role === "user" || cleanMsg.role === "system") {
           try {
-            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null });
+            const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? "system_guard" : null, isHistorical });
             newText = opt.optimizedText;
             if (opt.cachedContents) {
               outCachedContents.push(...opt.cachedContents);
@@ -51614,7 +51624,7 @@ ${runningTotal.toLocaleString()}`);
         if (provider === "openai" || provider === "anthropic") {
           finalRequestBody = {
             ...request.body,
-            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
           };
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
@@ -51643,7 +51653,7 @@ ${runningTotal.toLocaleString()}`);
         } else if (provider === "gemini") {
           finalRequestBody = {
             ...request.body,
-            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
           };
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
             for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {

@@ -208,7 +208,7 @@ function aggregateCoverage(target, source) {
         }
     }
 }
-async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
+async function getOptimizedMessages(originalMessages, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
     if (!originalMessages)
         return originalMessages;
     const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -218,9 +218,10 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
+        const isHistorical = lastUserIdx !== undefined && cleanMsg.role === 'user' && i < lastUserIdx;
         try {
             if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
+                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null, isHistorical });
                 newText = opt.optimizedText;
                 if (opt.cachedContents) {
                     outCachedContents.push(...opt.cachedContents);
@@ -294,7 +295,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
     }
     return newMessages;
 }
-async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = []) {
+async function getOptimizedGeminiContents(originalContents, cleanMessages, model, disableMasking, outCachedContents = [], outCoverageMetrics = null, outCompressionMap = [], lastUserIdx) {
     if (!originalContents)
         return originalContents;
     const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -304,9 +305,10 @@ async function getOptimizedGeminiContents(originalContents, cleanMessages, model
         if (!cleanMsg)
             continue;
         let newText = cleanMsg.content;
+        const isHistorical = lastUserIdx !== undefined && cleanMsg.role === 'user' && i < lastUserIdx;
         if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
             try {
-                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
+                const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null, isHistorical });
                 newText = opt.optimizedText;
                 if (opt.cachedContents) {
                     outCachedContents.push(...opt.cachedContents);
@@ -1407,7 +1409,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         if (provider === 'openai' || provider === 'anthropic') {
             finalRequestBody = {
                 ...request.body,
-                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+                messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
             };
             // Optimize top-level Anthropic system prompt
             if (provider === 'anthropic' && finalRequestBody.system) {
@@ -1439,7 +1441,7 @@ async function handleInterception(provider, targetUrl, request, reply) {
         else if (provider === 'gemini') {
             finalRequestBody = {
                 ...request.body,
-                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+                contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
             };
             // Optimize top-level Gemini systemInstruction
             if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {

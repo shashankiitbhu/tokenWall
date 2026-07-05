@@ -41,6 +41,7 @@ export interface PromptOptimizerOptions {
   disableCodeCompression?: boolean;
   disableJsonMasking?: boolean;
   optOutReason?: 'system_guard' | 'user_config' | null;
+  isHistorical?: boolean;
 }
 
 const CONVERSATIONAL_FILLERS = [
@@ -268,6 +269,18 @@ export class PromptOptimizer {
     // Apply filler regexes
     for (const item of CONVERSATIONAL_FILLERS) {
       optimized = optimized.replace(item.pattern, item.replacement);
+    }
+
+    if (options?.isHistorical) {
+      // Strip volatile sub-sections from historical environment details
+      optimized = optimized.replace(/# Visual Studio Code Visible Files\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+      optimized = optimized.replace(/# Visual Studio Code Open Tabs\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+      optimized = optimized.replace(/# Current Time\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+      optimized = optimized.replace(/# Context Window Usage\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+      optimized = optimized.replace(/# Current Mode\n[\s\S]*?(?=\n# |\n<\/environment_details>)/g, '');
+      
+      // Strip task_progress boilerplate
+      optimized = optimized.replace(/# task_progress List \(Optional - Plan Mode\)[\s\S]*?ensures nothing is missed\./gi, '');
     }
 
     // Clean up double spaces left over from replacements without destroying newlines

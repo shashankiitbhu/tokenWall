@@ -237,7 +237,8 @@ async function getOptimizedMessages(
   disableMasking?: boolean,
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null,
-  outCompressionMap: any[] = []
+  outCompressionMap: any[] = [],
+  lastUserIdx?: number
 ): Promise<any[]> {
   if (!originalMessages) return originalMessages;
   const newMessages = JSON.parse(JSON.stringify(originalMessages));
@@ -247,9 +248,11 @@ async function getOptimizedMessages(
     if (!cleanMsg) continue;
     
     let newText = cleanMsg.content;
+    const isHistorical = lastUserIdx !== undefined && cleanMsg.role === 'user' && i < lastUserIdx;
+    
     try {
       if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
-        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null, isHistorical });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
@@ -327,7 +330,8 @@ async function getOptimizedGeminiContents(
   disableMasking?: boolean,
   outCachedContents: any[] = [],
   outCoverageMetrics: any = null,
-  outCompressionMap: any[] = []
+  outCompressionMap: any[] = [],
+  lastUserIdx?: number
 ): Promise<any[]> {
   if (!originalContents) return originalContents;
   const newContents = JSON.parse(JSON.stringify(originalContents));
@@ -337,9 +341,11 @@ async function getOptimizedGeminiContents(
     if (!cleanMsg) continue;
     
     let newText = cleanMsg.content;
+    const isHistorical = lastUserIdx !== undefined && cleanMsg.role === 'user' && i < lastUserIdx;
+    
     if (cleanMsg.role === 'user' || cleanMsg.role === 'system') {
       try {
-        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null });
+        const opt = await promptOptimizer.optimize(newText, model, { disableCodeCompression: disableMasking, disableJsonMasking: disableMasking, optOutReason: disableMasking ? 'system_guard' : null, isHistorical });
         newText = opt.optimizedText;
         if (opt.cachedContents) {
           outCachedContents.push(...opt.cachedContents);
@@ -1477,7 +1483,7 @@ async function handleInterception(
     if (provider === 'openai' || provider === 'anthropic') {
       finalRequestBody = {
         ...request.body,
-        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
       };
       
       // Optimize top-level Anthropic system prompt
@@ -1503,7 +1509,7 @@ async function handleInterception(
     } else if (provider === 'gemini') {
       finalRequestBody = {
         ...request.body,
-        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap)
+        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx)
       };
       
       // Optimize top-level Gemini systemInstruction

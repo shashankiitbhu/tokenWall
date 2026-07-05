@@ -104,6 +104,7 @@ export class ProviderRegistry {
         const role = content.role === 'model' ? 'assistant' : 'user';
         const partsText = (content.parts || [])
           .map((p: any) => p.text || '')
+          .filter(Boolean)
           .join('\n');
         messages.push({ role, content: partsText });
       }

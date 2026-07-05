@@ -37,6 +37,7 @@ export interface PromptOptimizerOptions {
     disableCodeCompression?: boolean;
     disableJsonMasking?: boolean;
     optOutReason?: 'system_guard' | 'user_config' | null;
+    isHistorical?: boolean;
 }
 export declare class PromptOptimizer {
     optimize(prompt: string, model: string, options?: PromptOptimizerOptions): Promise<OptimizationResult>;
