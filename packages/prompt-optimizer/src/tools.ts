@@ -106,6 +106,8 @@ export class ToolSchemaOptimizer {
   }
 }
 
+import { CachedContent } from './code-compressor';
+
 // --- Tool Payload Crusher ---
 export class ToolPayloadCrusher {
   /**
@@ -189,26 +191,166 @@ export class ToolPayloadCrusher {
     return [...aggressiveHead, metadataNode];
   }
 
-  static optimizeToolResult(content: string, model: string): string {
+  static optimizeToolResult(content: string, model: string, outCachedContents: CachedContent[] = []): string {
+    // Attempt standard JSON parsing
     try {
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 5) {
-        const crushed = this.crushArray(parsed, 50, 1500, model);
-        return JSON.stringify(crushed);
-      } else if (typeof parsed === 'object' && parsed !== null) {
-        // Find massive arrays inside the object
-        let mutated = false;
-        for (const [key, val] of Object.entries(parsed)) {
-          if (Array.isArray(val) && val.length > 5) {
-            parsed[key] = this.crushArray(val, 50, 1500, model);
-            mutated = true;
-          }
-        }
-        if (mutated) return JSON.stringify(parsed);
+      return this.processJsonObject(parsed, model);
+    } catch (e) {
+      // Not standard JSON
+    }
+
+    // Attempt JSONL parsing
+    try {
+      const lines = content.trim().split('\n');
+      if (lines.length > 5) {
+        const parsedLines = lines.map(line => JSON.parse(line));
+        // It's valid JSONL! Treat it like an array.
+        const crushed = this.crushArray(parsedLines, 50, 1500, model);
+        return crushed.map(item => typeof item === 'string' && item.startsWith('... [TokenWall') ? item : JSON.stringify(item)).join('\n');
       }
     } catch (e) {
-      // Not JSON, return as is
+      // Not JSONL
     }
-    return content;
+
+    // --- Raw Text Processing ---
+    
+    // 1. ANSI Escape Code Stripping
+    const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+
+    // 2. Threshold Check
+    const lines = noAnsi.split('\n');
+    if (lines.length <= 100 && noAnsi.length <= 4000) {
+      return noAnsi; // Use stripped text to save tokens
+    }
+
+    // 3. Security Redaction
+    const redacted = this.redactText(noAnsi);
+    const redactedLines = redacted.split('\n');
+
+    // 4. Cache Full Redacted Text
+    const contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
+    outCachedContents.push({ id: contentId, content: redacted });
+
+    // 5. Relevance-Based Pruning
+    const highSignalRegex = /fatal|panic|error|exception|fail|traceback|warning/i;
+    const matches: { index: number, severity: number }[] = [];
+
+    for (let i = 0; i < redactedLines.length; i++) {
+      const line = redactedLines[i];
+      const match = line.match(highSignalRegex);
+      if (match) {
+        let severity = 1; // warning
+        if (/error|exception|fail|traceback/i.test(match[0])) severity = 2;
+        if (/fatal|panic/i.test(match[0])) severity = 3;
+        matches.push({ index: i, severity });
+      }
+    }
+
+    if (matches.length > 0) {
+      // Enforce Blowup Cap
+      // Sort matches by severity (descending) then by index (descending - favor tail)
+      matches.sort((a, b) => {
+        if (a.severity !== b.severity) return b.severity - a.severity;
+        return b.index - a.index;
+      });
+
+      // Keep top N matches (e.g. max 50 lines total -> roughly 5 matches with ±5 context)
+      const topMatches = matches.slice(0, 5).map(m => m.index);
+      topMatches.sort((a, b) => a - b); // restore chronological order
+
+      const ranges: [number, number][] = [];
+      // Always include head and tail (10 lines each)
+      ranges.push([0, Math.min(9, redactedLines.length - 1)]);
+      ranges.push([Math.max(0, redactedLines.length - 10), redactedLines.length - 1]);
+
+      for (const idx of topMatches) {
+        ranges.push([Math.max(0, idx - 5), Math.min(redactedLines.length - 1, idx + 5)]);
+      }
+
+      const mergedRanges = this.mergeRanges(ranges);
+      
+      const outputParts: string[] = [];
+      let lastEnd = -1;
+
+      for (const [start, end] of mergedRanges) {
+        if (start > lastEnd + 1 && lastEnd !== -1) {
+          const omitted = start - lastEnd - 1;
+          outputParts.push(`\n... [TokenWall: ${omitted} lines truncated. Use tokenwall_retrieve_content tool with content_id='${contentId}'] ...\n`);
+        }
+        outputParts.push(redactedLines.slice(start, end + 1).join('\n'));
+        lastEnd = end;
+      }
+
+      return outputParts.join('\n');
+    }
+
+    // 6. Fallback Positional Pruning
+    const headLines = redactedLines.slice(0, 30);
+    const tailLines = redactedLines.slice(-30);
+    const omittedCount = redactedLines.length - 60;
+    
+    return [
+      ...headLines,
+      `\n... [TokenWall: ${omittedCount} lines truncated — no error/warning markers detected in omitted region. Use tokenwall_retrieve_content tool with content_id='${contentId}'] ...\n`,
+      ...tailLines
+    ].join('\n');
+  }
+
+  private static processJsonObject(parsed: any, model: string): string {
+    if (Array.isArray(parsed) && parsed.length > 5) {
+      const crushed = this.crushArray(parsed, 50, 1500, model);
+      return JSON.stringify(crushed);
+    } else if (typeof parsed === 'object' && parsed !== null) {
+      let mutated = false;
+      for (const [key, val] of Object.entries(parsed)) {
+        if (Array.isArray(val) && val.length > 5) {
+          parsed[key] = this.crushArray(val, 50, 1500, model);
+          mutated = true;
+        }
+      }
+      if (mutated) return JSON.stringify(parsed);
+    }
+    return JSON.stringify(parsed);
+  }
+
+  private static redactText(text: string): string {
+    let redacted = text;
+    // Known Regex Formats
+    redacted = redacted.replace(/AKIA[0-9A-Z]{16}/g, '[REDACTED_AWS_KEY]');
+    redacted = redacted.replace(/Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/gi, 'Bearer [REDACTED_TOKEN]');
+    redacted = redacted.replace(/postgres:\/\/[^:]+:[^@]+@/gi, 'postgres://[REDACTED_USER]:[REDACTED_PASS]@');
+    
+    // Entropy Pass (High-entropy strings > 40 chars)
+    // Matches long base64/hex strings
+    redacted = redacted.replace(/[a-zA-Z0-9\-_]{40,}/g, (match) => {
+      // Simple heuristic: if it looks like a hash or token, redact it
+      if (match.length >= 40 && !match.match(/^[0-9]+$/)) { // Not just a massive number
+         return '[REDACTED_HIGH_ENTROPY_STRING]';
+      }
+      return match;
+    });
+
+    return redacted;
+  }
+
+  private static mergeRanges(ranges: [number, number][]): [number, number][] {
+    if (ranges.length === 0) return [];
+    // Sort by start index
+    ranges.sort((a, b) => a[0] - b[0]);
+    
+    const merged: [number, number][] = [ranges[0]];
+    for (let i = 1; i < ranges.length; i++) {
+      const current = ranges[i];
+      const last = merged[merged.length - 1];
+      
+      // If ranges overlap or are exactly adjacent, merge them
+      if (current[0] <= last[1] + 1) {
+        last[1] = Math.max(last[1], current[1]);
+      } else {
+        merged.push(current);
+      }
+    }
+    return merged;
   }
 }

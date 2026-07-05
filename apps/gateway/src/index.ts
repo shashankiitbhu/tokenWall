@@ -244,7 +244,7 @@ async function getOptimizedMessages(
           outCompressionMap.push(...opt.compressionMap);
         }
       } else if (cleanMsg.role === 'tool') {
-        newText = ToolPayloadCrusher.optimizeToolResult(newText, model);
+        newText = ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
       }
     } catch (e: any) {
       console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
@@ -280,7 +280,7 @@ async function getOptimizedMessages(
         if (b.type === 'tool_result') {
           if (typeof b.content === 'string') {
             try {
-              b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model);
+              b.content = ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
             } catch (e) {
               console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
             }
@@ -288,7 +288,7 @@ async function getOptimizedMessages(
             b.content.forEach((part: any) => {
               if (part.type === 'text' && typeof part.text === 'string') {
                 try {
-                  part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                  part.text = ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
                 } catch (e) {
                   console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
                 }
@@ -353,6 +353,23 @@ async function getOptimizedGeminiContents(
       } else if (newText) {
         origContent.parts.push({ text: newText });
       }
+
+      // Gemini functionResponse crushing
+      origContent.parts.forEach((p: any) => {
+        if (p.functionResponse && p.functionResponse.response) {
+          try {
+            const responseStr = typeof p.functionResponse.response === 'string' ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
+            const optimizedStr = ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+            try {
+              p.functionResponse.response = JSON.parse(optimizedStr);
+            } catch (e) {
+              p.functionResponse.response = { result: optimizedStr };
+            }
+          } catch (e) {
+            console.error("[TokenWall Gateway] Gemini functionResponse crushing failed, falling open");
+          }
+        }
+      });
     }
   }
 
