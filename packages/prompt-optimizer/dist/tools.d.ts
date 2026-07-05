@@ -17,6 +17,7 @@ export declare class ToolSchemaOptimizer {
     static optimizeSchemaNode(node: any, aggressive?: boolean): void;
     static optimize(tools: any[], aggressive?: boolean): any[];
 }
+import { CachedContent } from './code-compressor';
 export declare class ToolPayloadCrusher {
     /**
      * Detects if an array is homogeneous (objects with identical keys and primitive values)
@@ -24,5 +25,8 @@ export declare class ToolPayloadCrusher {
     static isHomogeneous(arr: any[]): boolean;
     static convertToCSV(arr: any[]): string;
     static crushArray(arr: any[], maxItems: number, maxTokens: number, model: string): any[];
-    static optimizeToolResult(content: string, model: string): string;
+    static optimizeToolResult(content: string, model: string, outCachedContents?: CachedContent[]): string;
+    private static processJsonObject;
+    private static redactText;
+    private static mergeRanges;
 }

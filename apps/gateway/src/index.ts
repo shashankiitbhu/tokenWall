@@ -1534,6 +1534,22 @@ async function handleInterception(
     
     console.log(c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
     
+    // Log successfully applied techniques
+    if (contextReport.coverage) {
+      if (contextReport.coverage.json?.successfullyOptimized > 0) {
+        console.log(c.blue(`  ↳ ✅ AST Structure Masking (JSON) applied to ${contextReport.coverage.json.successfullyOptimized} block(s).`));
+      }
+      if (contextReport.coverage.code?.successfullyOptimized > 0) {
+        console.log(c.blue(`  ↳ ✅ AST Code Sparsification applied to ${contextReport.coverage.code.successfullyOptimized} block(s).`));
+      }
+    }
+    if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
+      console.log(c.blue(`  ↳ ✅ Reversible Content Compression (CCR) generated ${contextReport.cachedContents.length} cache reference(s).`));
+    }
+    if (globalCompressionMap && globalCompressionMap.length > 0) {
+      console.log(c.blue(`  ↳ ✅ Structural AST Diffing (Write-Path Mapping) initialized.`));
+    }
+    
     // Save CCR cached contents if any
     if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
       for (const cc of contextReport.cachedContents) {

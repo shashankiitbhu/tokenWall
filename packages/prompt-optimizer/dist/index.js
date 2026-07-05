@@ -14,11 +14,16 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ToolPruner = exports.PromptOptimizer = void 0;
+exports.ToolPruner = exports.PromptOptimizer = exports.ASTDiffApplier = exports.ASTDiffer = exports.CodeChunker = void 0;
 const estimators_1 = require("@tokenwall/estimators");
 const code_compressor_1 = require("./code-compressor");
 const tool_pruner_1 = require("./tool-pruner");
 Object.defineProperty(exports, "ToolPruner", { enumerable: true, get: function () { return tool_pruner_1.ToolPruner; } });
+var code_chunker_1 = require("./code-chunker");
+Object.defineProperty(exports, "CodeChunker", { enumerable: true, get: function () { return code_chunker_1.CodeChunker; } });
+var ast_differ_1 = require("./ast-differ");
+Object.defineProperty(exports, "ASTDiffer", { enumerable: true, get: function () { return ast_differ_1.ASTDiffer; } });
+Object.defineProperty(exports, "ASTDiffApplier", { enumerable: true, get: function () { return ast_differ_1.ASTDiffApplier; } });
 const CONVERSATIONAL_FILLERS = [
     // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
     { pattern: /<system-reminder>[\s\S]*?<\/system-reminder>/gi, replacement: '' },
@@ -175,7 +180,7 @@ async function getMagika() {
             }
         }
         catch (e) {
-            // Magika not available
+            console.warn('[TokenWall] ⚠️ Magika not available. Falling back to heuristic detection.');
         }
     }
     return _magikaInstance;
@@ -185,6 +190,7 @@ class PromptOptimizer {
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
         let compressionMap = [];
+        let chunkedBlocks = [];
         const coverage = {
             json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
             code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
@@ -219,6 +225,9 @@ class PromptOptimizer {
         if (codeResult.compressionMap) {
             compressionMap.push(...codeResult.compressionMap);
         }
+        if (codeResult.chunkedBlocks) {
+            chunkedBlocks.push(...codeResult.chunkedBlocks);
+        }
         if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
             coverage.sampledFailures.push({ type: 'magika_mismatch', reason: 'Magika detected code, but regex found no fence', snippet: prompt.substring(0, 200) });
         }
@@ -245,7 +254,8 @@ class PromptOptimizer {
             savingsPercent,
             cachedContents: allCachedContents,
             coverage,
-            compressionMap
+            compressionMap,
+            chunkedBlocks
         };
     }
 }

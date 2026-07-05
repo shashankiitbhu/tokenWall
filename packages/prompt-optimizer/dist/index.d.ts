@@ -1,5 +1,7 @@
 import { CachedContent } from './code-compressor';
 import { ToolPruner } from './tool-pruner';
+export { CodeChunker } from './code-chunker';
+export { ASTDiffer, ASTDiffApplier } from './ast-differ';
 export interface CoverageMetrics {
     json: {
         magikaDetected: number;
@@ -29,6 +31,7 @@ export interface OptimizationResult {
     cachedContents?: CachedContent[];
     coverage?: CoverageMetrics;
     compressionMap?: any[];
+    chunkedBlocks?: any[];
 }
 export interface PromptOptimizerOptions {
     disableCodeCompression?: boolean;

@@ -156,9 +156,20 @@ function applyReverseMapping(targetContent, replacementContent, compressionMap) 
     if (!compressionMap || compressionMap.length === 0)
         return { target: targetContent, replacement: replacementContent };
     for (const entry of compressionMap) {
-        const { original, compressed } = entry;
+        const { original, compressed, mappings } = entry;
         const idx = compressed.indexOf(targetContent);
         if (idx !== -1) {
+            if (mappings && mappings.length > 0) {
+                try {
+                    const { target, replacement, verified } = prompt_optimizer_1.ASTDiffer.runASTDiff(original, compressed, targetContent, replacementContent, mappings);
+                    if (verified) {
+                        return { target, replacement };
+                    }
+                }
+                catch (e) {
+                    console.error("[TokenWall Gateway] ASTDiffer failed, falling back to line mapping", e);
+                }
+            }
             const prefix = compressed.substring(0, idx);
             const startLine = prefix.split('\n').length - 1;
             const endLine = startLine + targetContent.split('\n').length - 1;
@@ -222,7 +233,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                 }
             }
             else if (cleanMsg.role === 'tool') {
-                newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
+                newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
             }
         }
         catch (e) {
@@ -259,7 +270,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                 if (b.type === 'tool_result') {
                     if (typeof b.content === 'string') {
                         try {
-                            b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+                            b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
                         }
                         catch (e) {
                             console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
@@ -269,7 +280,7 @@ async function getOptimizedMessages(originalMessages, cleanMessages, model, disa
                         b.content.forEach((part) => {
                             if (part.type === 'text' && typeof part.text === 'string') {
                                 try {
-                                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                                    part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
                                 }
                                 catch (e) {
                                     console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
@@ -328,6 +339,24 @@ async function getOptimizedGeminiContents(originalContents, cleanMessages, model
             else if (newText) {
                 origContent.parts.push({ text: newText });
             }
+            // Gemini functionResponse crushing
+            origContent.parts.forEach((p) => {
+                if (p.functionResponse && p.functionResponse.response) {
+                    try {
+                        const responseStr = typeof p.functionResponse.response === 'string' ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
+                        const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+                        try {
+                            p.functionResponse.response = JSON.parse(optimizedStr);
+                        }
+                        catch (e) {
+                            p.functionResponse.response = { result: optimizedStr };
+                        }
+                    }
+                    catch (e) {
+                        console.error("[TokenWall Gateway] Gemini functionResponse crushing failed, falling open");
+                    }
+                }
+            });
         }
     }
     return newContents;
@@ -1438,6 +1467,21 @@ async function handleInterception(provider, targetUrl, request, reply) {
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`✔ Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
+        // Log successfully applied techniques
+        if (contextReport.coverage) {
+            if (contextReport.coverage.json?.successfullyOptimized > 0) {
+                console.log(terminal_ui_1.c.blue(`  ↳ ✅ AST Structure Masking (JSON) applied to ${contextReport.coverage.json.successfullyOptimized} block(s).`));
+            }
+            if (contextReport.coverage.code?.successfullyOptimized > 0) {
+                console.log(terminal_ui_1.c.blue(`  ↳ ✅ AST Code Sparsification applied to ${contextReport.coverage.code.successfullyOptimized} block(s).`));
+            }
+        }
+        if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
+            console.log(terminal_ui_1.c.blue(`  ↳ ✅ Reversible Content Compression (CCR) generated ${contextReport.cachedContents.length} cache reference(s).`));
+        }
+        if (globalCompressionMap && globalCompressionMap.length > 0) {
+            console.log(terminal_ui_1.c.blue(`  ↳ ✅ Structural AST Diffing (Write-Path Mapping) initialized.`));
+        }
         // Save CCR cached contents if any
         if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
             for (const cc of contextReport.cachedContents) {

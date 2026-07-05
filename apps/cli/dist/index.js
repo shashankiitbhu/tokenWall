@@ -38230,6 +38230,7 @@ var require_dist9 = __commonJS({
             _magikaInstance = inst;
           }
         } catch (e) {
+          console.warn("[TokenWall] \u26A0\uFE0F Magika not available. Falling back to heuristic detection.");
         }
       }
       return _magikaInstance;
@@ -38902,6 +38903,160 @@ var require_dist10 = __commonJS({
   }
 });
 
+// packages/prompt-optimizer/dist/code-chunker.js
+var require_code_chunker = __commonJS({
+  "packages/prompt-optimizer/dist/code-chunker.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.CodeChunker = void 0;
+    var CodeChunker = class {
+      static chunk(tree, code, maxChunkSize = 4e3) {
+        const scopeTree = this.buildScopeTree(tree.rootNode);
+        const splittableBlocks = this.getSplittableBlocks(tree.rootNode, maxChunkSize);
+        const mergedChunks = this.mergeBlocks(splittableBlocks, maxChunkSize, code);
+        return { chunks: mergedChunks, scopeTree };
+      }
+      static buildScopeTree(node) {
+        const scope = {
+          type: node.type,
+          name: this.getNodeName(node),
+          startIndex: node.startIndex,
+          endIndex: node.endIndex,
+          children: []
+        };
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            if (this.isScopeBoundary(child)) {
+              scope.children.push(this.buildScopeTree(child));
+            } else {
+              const subScopes = this.findNestedScopes(child);
+              scope.children.push(...subScopes);
+            }
+          }
+        }
+        return scope;
+      }
+      static findNestedScopes(node) {
+        const scopes = [];
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child) {
+            if (this.isScopeBoundary(child)) {
+              scopes.push(this.buildScopeTree(child));
+            } else {
+              scopes.push(...this.findNestedScopes(child));
+            }
+          }
+        }
+        return scopes;
+      }
+      static isScopeBoundary(node) {
+        return [
+          "class_declaration",
+          "function_declaration",
+          "method_definition",
+          "arrow_function",
+          "interface_declaration",
+          "type_alias_declaration"
+        ].includes(node.type);
+      }
+      static getNodeName(node) {
+        const idNode = node.children.find((c) => c.type === "identifier" || c.type === "property_identifier");
+        if (idNode) {
+          return idNode.text;
+        }
+        return null;
+      }
+      static getSplittableBlocks(node, maxSize) {
+        const size = node.endIndex - node.startIndex;
+        if (node.type !== "program" && node.type !== "class_body" && node.type !== "statement_block") {
+          if (size <= maxSize) {
+            return [{ startIndex: node.startIndex, endIndex: node.endIndex, node }];
+          }
+        }
+        const blocks = [];
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (!child || !child.isNamed)
+            continue;
+          const childSize = child.endIndex - child.startIndex;
+          if (childSize > maxSize && this.canSplit(child)) {
+            blocks.push(...this.getSplittableBlocks(child, maxSize));
+          } else {
+            blocks.push({ startIndex: child.startIndex, endIndex: child.endIndex, node: child });
+          }
+        }
+        if (blocks.length === 0) {
+          return [{ startIndex: node.startIndex, endIndex: node.endIndex, node }];
+        }
+        return blocks;
+      }
+      static canSplit(node) {
+        return [
+          "program",
+          "class_declaration",
+          "class_body",
+          "function_declaration",
+          "statement_block",
+          "export_statement",
+          "lexical_declaration",
+          "method_definition"
+        ].includes(node.type);
+      }
+      static mergeBlocks(blocks, maxSize, code) {
+        const chunks = [];
+        let currentChunkStart = -1;
+        let currentChunkEnd = -1;
+        for (const block of blocks) {
+          if (currentChunkStart === -1) {
+            currentChunkStart = block.startIndex;
+            currentChunkEnd = block.endIndex;
+          } else {
+            const prospectiveSize = block.endIndex - currentChunkStart;
+            if (prospectiveSize <= maxSize) {
+              currentChunkEnd = block.endIndex;
+            } else {
+              chunks.push({
+                text: code.slice(currentChunkStart, currentChunkEnd),
+                startIndex: currentChunkStart,
+                endIndex: currentChunkEnd
+              });
+              currentChunkStart = block.startIndex;
+              currentChunkEnd = block.endIndex;
+            }
+          }
+        }
+        if (currentChunkStart !== -1) {
+          chunks.push({
+            text: code.slice(currentChunkStart, currentChunkEnd),
+            startIndex: currentChunkStart,
+            endIndex: currentChunkEnd
+          });
+        }
+        const continuousChunks = [];
+        let lastEnd = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          let start = lastEnd;
+          let end = chunk.endIndex;
+          if (i === chunks.length - 1) {
+            end = code.length;
+          }
+          continuousChunks.push({
+            text: code.slice(start, end),
+            startIndex: start,
+            endIndex: end
+          });
+          lastEnd = end;
+        }
+        return continuousChunks;
+      }
+    };
+    exports2.CodeChunker = CodeChunker;
+  }
+});
+
 // packages/prompt-optimizer/dist/code-compressor.js
 var require_code_compressor = __commonJS({
   "packages/prompt-optimizer/dist/code-compressor.js"(exports2) {
@@ -38920,11 +39075,13 @@ var require_code_compressor = __commonJS({
     tsParser.setLanguage(tree_sitter_typescript_1.default.typescript);
     var tsxParser = new tree_sitter_1.default();
     tsxParser.setLanguage(tree_sitter_typescript_1.default.tsx);
+    var code_chunker_1 = require_code_chunker();
     var CodeCompressor = class {
       /**
        * Scans a prompt for JS/TS code blocks and `<file_content>` blocks,
        * parses them into an AST using Tree-sitter, strips only actual comment nodes,
        * and skeletonizes large function bodies by masking them with a CCR token.
+       * Also performs AST-aware chunking on the optimized source.
        */
       static compress(prompt, disableCodeCompression = false, optOutReason = null, metrics) {
         const mdBlockRegex = /```(javascript|js|typescript|ts|jsx|tsx)\s*([\s\S]*?)\s*```/gi;
@@ -38938,27 +39095,34 @@ var require_code_compressor = __commonJS({
         }
         if (disableCodeCompression) {
           if (metrics && totalDetected > 0) {
-            if (optOutReason === "system_guard")
+            if (optOutReason === "system_guard") {
+              console.warn(`[TokenWall] \u26A0\uFE0F Write-Path System Guard active: Skipping AST code compression to preserve write-path integrity.`);
               metrics.code.fallbackOptOutSystemGuard += totalDetected;
-            else
+            }
+            if (optOutReason === "user_config")
               metrics.code.fallbackOptOutUserConfig += totalDetected;
           }
-          return { optimizedText: prompt, cachedContents: [], compressionMap: [] };
+          return { optimizedText: prompt, cachedContents: [], compressionMap: [], chunkedBlocks: [] };
         }
         const cachedContents = [];
         const compressionMap = [];
+        const chunkedBlocks = [];
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
           try {
-            const sparsified = this.sparsifyCode(code, lang, cachedContents);
+            const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, lang, cachedContents);
             if (metrics)
               metrics.code.successfullyOptimized++;
             if (sparsified !== code) {
-              compressionMap.push({ original: code, compressed: sparsified });
+              compressionMap.push({ original: code, compressed: sparsified, mappings });
+            }
+            if (chunks.length > 0 && scopeTree) {
+              chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2, 9)}`, language: lang, chunks, scopeTree });
             }
             return `\`\`\`${lang}
 ${sparsified}
 \`\`\``;
           } catch (e) {
+            console.warn(`[TokenWall] \u26A0\uFE0F Tree-sitter parse error (${lang}). Falling open to uncompressed code:`, e.message);
             if (metrics) {
               metrics.code.fallbackParseFailure++;
               metrics.sampledFailures.push({ type: "parse_failure", reason: e.message || "Tree-sitter error", snippet: code.substring(0, 200) });
@@ -38968,16 +39132,20 @@ ${sparsified}
         });
         optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
           try {
-            const sparsified = this.sparsifyCode(code, ext, cachedContents);
+            const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, ext, cachedContents);
             if (metrics)
               metrics.code.successfullyOptimized++;
             if (sparsified !== code) {
-              compressionMap.push({ original: code, compressed: sparsified });
+              compressionMap.push({ original: code, compressed: sparsified, mappings });
+            }
+            if (chunks.length > 0 && scopeTree) {
+              chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2, 9)}`, language: ext, chunks, scopeTree });
             }
             return match.replace(code, `
 ${sparsified}
 `);
           } catch (e) {
+            console.warn(`[TokenWall] \u26A0\uFE0F Tree-sitter parse error (${ext}). Falling open to uncompressed xml block code:`, e.message);
             if (metrics) {
               metrics.code.fallbackParseFailure++;
               metrics.sampledFailures.push({ type: "parse_failure", reason: e.message || "Tree-sitter error", snippet: code.substring(0, 200) });
@@ -38985,7 +39153,7 @@ ${sparsified}
             return match;
           }
         });
-        return { optimizedText: optimized, cachedContents, compressionMap };
+        return { optimizedText: optimized, cachedContents, compressionMap, chunkedBlocks };
       }
       /**
        * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
@@ -39038,10 +39206,20 @@ ${sparsified}
           for (const node of removeNodes) {
             result = result.slice(0, node.startIndex) + (node.replaceWith || "") + result.slice(node.endIndex);
           }
-          return result.trim();
+          const sparsified = result.trim();
+          let chunks = [];
+          let scopeTree = null;
+          try {
+            const sparsifiedTree = parser.parse(sparsified);
+            const chunkResult = code_chunker_1.CodeChunker.chunk(sparsifiedTree, sparsified);
+            chunks = chunkResult.chunks;
+            scopeTree = chunkResult.scopeTree;
+          } catch (ce) {
+            console.error("[TokenWall CodeCompressor] CodeChunker failed:", ce);
+          }
+          return { sparsified, chunks, scopeTree, mappings: removeNodes.map((n) => ({ originalStart: n.startIndex, originalEnd: n.endIndex, replaceWith: n.replaceWith || "" })) };
         } catch (e) {
-          console.error("[TokenWall CodeCompressor] Tree-sitter parsing failed:", e);
-          return code;
+          return { sparsified: code, chunks: [], scopeTree: null, mappings: [] };
         }
       }
     };
@@ -39215,26 +39393,129 @@ var require_tools2 = __commonJS({
         }
         return [...aggressiveHead, metadataNode];
       }
-      static optimizeToolResult(content, model) {
+      static optimizeToolResult(content, model, outCachedContents = []) {
         try {
           const parsed = JSON.parse(content);
-          if (Array.isArray(parsed) && parsed.length > 5) {
-            const crushed = this.crushArray(parsed, 50, 1500, model);
-            return JSON.stringify(crushed);
-          } else if (typeof parsed === "object" && parsed !== null) {
-            let mutated = false;
-            for (const [key, val] of Object.entries(parsed)) {
-              if (Array.isArray(val) && val.length > 5) {
-                parsed[key] = this.crushArray(val, 50, 1500, model);
-                mutated = true;
-              }
-            }
-            if (mutated)
-              return JSON.stringify(parsed);
+          return this.processJsonObject(parsed, model);
+        } catch (e) {
+        }
+        try {
+          const lines2 = content.trim().split("\n");
+          if (lines2.length > 5) {
+            const parsedLines = lines2.map((line) => JSON.parse(line));
+            const crushed = this.crushArray(parsedLines, 50, 1500, model);
+            return crushed.map((item) => typeof item === "string" && item.startsWith("... [TokenWall") ? item : JSON.stringify(item)).join("\n");
           }
         } catch (e) {
         }
-        return content;
+        const noAnsi = content.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+        const lines = noAnsi.split("\n");
+        if (lines.length <= 100 && noAnsi.length <= 4e3) {
+          return noAnsi;
+        }
+        const redacted = this.redactText(noAnsi);
+        const redactedLines = redacted.split("\n");
+        const contentId = `ccr_txt_${Math.random().toString(36).substring(2, 9)}`;
+        outCachedContents.push({ id: contentId, content: redacted });
+        const highSignalRegex = /fatal|panic|error|exception|fail|traceback|warning/i;
+        const matches = [];
+        for (let i = 0; i < redactedLines.length; i++) {
+          const line = redactedLines[i];
+          const match = line.match(highSignalRegex);
+          if (match) {
+            let severity = 1;
+            if (/error|exception|fail|traceback/i.test(match[0]))
+              severity = 2;
+            if (/fatal|panic/i.test(match[0]))
+              severity = 3;
+            matches.push({ index: i, severity });
+          }
+        }
+        if (matches.length > 0) {
+          matches.sort((a, b) => {
+            if (a.severity !== b.severity)
+              return b.severity - a.severity;
+            return b.index - a.index;
+          });
+          const topMatches = matches.slice(0, 5).map((m) => m.index);
+          topMatches.sort((a, b) => a - b);
+          const ranges = [];
+          ranges.push([0, Math.min(9, redactedLines.length - 1)]);
+          ranges.push([Math.max(0, redactedLines.length - 10), redactedLines.length - 1]);
+          for (const idx of topMatches) {
+            ranges.push([Math.max(0, idx - 5), Math.min(redactedLines.length - 1, idx + 5)]);
+          }
+          const mergedRanges = this.mergeRanges(ranges);
+          const outputParts = [];
+          let lastEnd = -1;
+          for (const [start, end] of mergedRanges) {
+            if (start > lastEnd + 1 && lastEnd !== -1) {
+              const omitted = start - lastEnd - 1;
+              outputParts.push(`
+... [TokenWall: ${omitted} lines truncated. Use tokenwall_retrieve_content tool with content_id='${contentId}'] ...
+`);
+            }
+            outputParts.push(redactedLines.slice(start, end + 1).join("\n"));
+            lastEnd = end;
+          }
+          return outputParts.join("\n");
+        }
+        const headLines = redactedLines.slice(0, 30);
+        const tailLines = redactedLines.slice(-30);
+        const omittedCount = redactedLines.length - 60;
+        return [
+          ...headLines,
+          `
+... [TokenWall: ${omittedCount} lines truncated \u2014 no error/warning markers detected in omitted region. Use tokenwall_retrieve_content tool with content_id='${contentId}'] ...
+`,
+          ...tailLines
+        ].join("\n");
+      }
+      static processJsonObject(parsed, model) {
+        if (Array.isArray(parsed) && parsed.length > 5) {
+          const crushed = this.crushArray(parsed, 50, 1500, model);
+          return JSON.stringify(crushed);
+        } else if (typeof parsed === "object" && parsed !== null) {
+          let mutated = false;
+          for (const [key, val] of Object.entries(parsed)) {
+            if (Array.isArray(val) && val.length > 5) {
+              parsed[key] = this.crushArray(val, 50, 1500, model);
+              mutated = true;
+            }
+          }
+          if (mutated)
+            return JSON.stringify(parsed);
+        }
+        return JSON.stringify(parsed);
+      }
+      static redactText(text) {
+        let redacted = text;
+        redacted = redacted.replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]");
+        redacted = redacted.replace(/Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/gi, "Bearer [REDACTED_TOKEN]");
+        redacted = redacted.replace(/postgres:\/\/[^:]+:[^@]+@/gi, "postgres://[REDACTED_USER]:[REDACTED_PASS]@");
+        redacted = redacted.replace(/[a-zA-Z0-9\-_]{40,}/g, (match) => {
+          if (match.length >= 40 && !match.match(/^[0-9]+$/)) {
+            return "[REDACTED_HIGH_ENTROPY_STRING]";
+          }
+          return match;
+        });
+        return redacted;
+      }
+      static mergeRanges(ranges) {
+        if (ranges.length === 0)
+          return [];
+        ranges.sort((a, b) => a[0] - b[0]);
+        const merged = [ranges[0]];
+        for (let i = 1; i < ranges.length; i++) {
+          const current = ranges[i];
+          const last = merged[merged.length - 1];
+          if (current[0] <= last[1] + 1) {
+            last[1] = Math.max(last[1], current[1]);
+          } else {
+            merged.push(current);
+          }
+        }
+        return merged;
       }
     };
     exports2.ToolPayloadCrusher = ToolPayloadCrusher;
@@ -39305,6 +39586,173 @@ var require_tool_pruner = __commonJS({
   }
 });
 
+// packages/prompt-optimizer/dist/ast-differ.js
+var require_ast_differ = __commonJS({
+  "packages/prompt-optimizer/dist/ast-differ.js"(exports2) {
+    "use strict";
+    var __importDefault = exports2 && exports2.__importDefault || function(mod) {
+      return mod && mod.__esModule ? mod : { "default": mod };
+    };
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.ASTDiffApplier = exports2.ASTDiffer = void 0;
+    var tree_sitter_1 = __importDefault(require("tree-sitter"));
+    var tree_sitter_typescript_1 = __importDefault(require("tree-sitter-typescript"));
+    var ASTDiffer = class {
+      static runASTDiff(originalFile, compressedFile, targetContentInComp, replacementContentInComp, mappings) {
+        const editedCompressedFile = compressedFile.replace(targetContentInComp, replacementContentInComp);
+        if (editedCompressedFile === compressedFile) {
+          return { target: targetContentInComp, replacement: replacementContentInComp, verified: false };
+        }
+        const parser = new tree_sitter_1.default();
+        parser.setLanguage(tree_sitter_typescript_1.default.tsx);
+        const compTree = parser.parse(compressedFile);
+        const editTree = parser.parse(editedCompressedFile);
+        const edits = this.diff(compTree.rootNode, editTree.rootNode);
+        const editedOriginalFile = ASTDiffApplier.applyEdits(originalFile, edits, mappings);
+        const startOffsetInComp = compressedFile.indexOf(targetContentInComp);
+        const endOffsetInComp = startOffsetInComp + targetContentInComp.length;
+        const origStart = ASTDiffApplier.mapOffset(startOffsetInComp, mappings);
+        const origEnd = ASTDiffApplier.mapOffset(endOffsetInComp, mappings);
+        const exactTargetChunk = originalFile.slice(origStart, origEnd);
+        const newReplacementChunk = editedOriginalFile.slice(origStart, origStart + (editedOriginalFile.length - originalFile.length + exactTargetChunk.length));
+        let verified = true;
+        if (!exactTargetChunk || exactTargetChunk.length === 0)
+          verified = false;
+        return { target: exactTargetChunk, replacement: newReplacementChunk, verified };
+      }
+      /**
+       * Compares two ASTs (T_comp and T_edit) and generates an edit script (a list of AST edits).
+       * This is a simplified GumTree-lite top-down phase:
+       * It looks for isomorphic or modified top-level nodes (functions, classes, variables)
+       * and generates granular edit operations for the modified regions.
+       */
+      static diff(compNode, editNode) {
+        const edits = [];
+        const compChildren = this.getNamedChildren(compNode);
+        const editChildren = this.getNamedChildren(editNode);
+        if (compChildren.length === 0 && editChildren.length === 0) {
+          if (compNode.text !== editNode.text) {
+            edits.push({
+              type: "update",
+              startByte: compNode.startIndex,
+              endByte: compNode.endIndex,
+              newText: editNode.text
+            });
+          }
+          return edits;
+        }
+        let i = 0;
+        let j = 0;
+        while (i < compChildren.length && j < editChildren.length) {
+          const c1 = compChildren[i];
+          const c2 = editChildren[j];
+          if (this.areNodesIdentical(c1, c2)) {
+            i++;
+            j++;
+          } else if (this.isSameEntity(c1, c2)) {
+            edits.push(...this.diff(c1, c2));
+            i++;
+            j++;
+          } else {
+            return [{
+              type: "update",
+              startByte: compNode.startIndex,
+              endByte: compNode.endIndex,
+              newText: editNode.text
+            }];
+          }
+        }
+        while (i < compChildren.length) {
+          const c1 = compChildren[i];
+          edits.push({
+            type: "delete",
+            startByte: c1.startIndex,
+            endByte: c1.endIndex
+          });
+          i++;
+        }
+        while (j < editChildren.length) {
+          const lastPos = compChildren.length > 0 ? compChildren[compChildren.length - 1].endIndex : compNode.startIndex;
+          edits.push({
+            type: "insert",
+            startByte: lastPos,
+            endByte: lastPos,
+            newText: editChildren[j].text
+          });
+          j++;
+        }
+        return edits;
+      }
+      static getNamedChildren(node) {
+        const children = [];
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i);
+          if (child && child.isNamed) {
+            children.push(child);
+          }
+        }
+        return children;
+      }
+      static areNodesIdentical(n1, n2) {
+        return n1.type === n2.type && n1.text === n2.text;
+      }
+      static isSameEntity(n1, n2) {
+        if (n1.type !== n2.type)
+          return false;
+        const n1Name = this.getIdentifierName(n1);
+        const n2Name = this.getIdentifierName(n2);
+        if (n1Name && n2Name)
+          return n1Name === n2Name;
+        return false;
+      }
+      static getIdentifierName(node) {
+        const idNode = node.children.find((c) => c.type === "identifier" || c.type === "property_identifier");
+        return idNode ? idNode.text : null;
+      }
+    };
+    exports2.ASTDiffer = ASTDiffer;
+    var ASTDiffApplier = class {
+      static applyEdits(originalText, edits, mappings) {
+        const sortedEdits = [...edits].sort((a, b) => b.startByte - a.startByte);
+        let result = originalText;
+        const ascMappings = [...mappings].sort((a, b) => a.originalStart - b.originalStart);
+        for (const edit of sortedEdits) {
+          const origStart = this.mapOffset(edit.startByte, ascMappings);
+          const origEnd = this.mapOffset(edit.endByte, ascMappings);
+          if (edit.type === "delete") {
+            result = result.slice(0, origStart) + result.slice(origEnd);
+          } else if (edit.type === "insert") {
+            result = result.slice(0, origStart) + (edit.newText || "") + result.slice(origStart);
+          } else if (edit.type === "update") {
+            result = result.slice(0, origStart) + (edit.newText || "") + result.slice(origEnd);
+          }
+        }
+        return result;
+      }
+      static mapOffset(compOffset, ascMappings) {
+        let currentCompOffset = 0;
+        let currentOrigOffset = 0;
+        for (const m of ascMappings) {
+          const intactLength = m.originalStart - currentOrigOffset;
+          if (compOffset <= currentCompOffset + intactLength) {
+            return currentOrigOffset + (compOffset - currentCompOffset);
+          }
+          currentCompOffset += intactLength;
+          currentOrigOffset = m.originalStart;
+          const replacedLength = m.replaceWith.length;
+          if (compOffset < currentCompOffset + replacedLength) {
+            return m.originalEnd;
+          }
+          currentCompOffset += replacedLength;
+          currentOrigOffset = m.originalEnd;
+        }
+        return currentOrigOffset + (compOffset - currentCompOffset);
+      }
+    };
+    exports2.ASTDiffApplier = ASTDiffApplier;
+  }
+});
+
 // packages/prompt-optimizer/dist/verbosity-steering.js
 var require_verbosity_steering = __commonJS({
   "packages/prompt-optimizer/dist/verbosity-steering.js"(exports2) {
@@ -39351,12 +39799,23 @@ var require_dist11 = __commonJS({
       for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports3, p)) __createBinding(exports3, m, p);
     };
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.ToolPruner = exports2.PromptOptimizer = void 0;
+    exports2.ToolPruner = exports2.PromptOptimizer = exports2.ASTDiffApplier = exports2.ASTDiffer = exports2.CodeChunker = void 0;
     var estimators_1 = require_dist7();
     var code_compressor_1 = require_code_compressor();
     var tool_pruner_1 = require_tool_pruner();
     Object.defineProperty(exports2, "ToolPruner", { enumerable: true, get: function() {
       return tool_pruner_1.ToolPruner;
+    } });
+    var code_chunker_1 = require_code_chunker();
+    Object.defineProperty(exports2, "CodeChunker", { enumerable: true, get: function() {
+      return code_chunker_1.CodeChunker;
+    } });
+    var ast_differ_1 = require_ast_differ();
+    Object.defineProperty(exports2, "ASTDiffer", { enumerable: true, get: function() {
+      return ast_differ_1.ASTDiffer;
+    } });
+    Object.defineProperty(exports2, "ASTDiffApplier", { enumerable: true, get: function() {
+      return ast_differ_1.ASTDiffApplier;
     } });
     var CONVERSATIONAL_FILLERS = [
       // Semantic compression (stripping irrelevant boilerplate and summarizing agent/skills systems)
@@ -39493,6 +39952,7 @@ ${JSON.stringify(walk(parsed), null, 2)}
             _magikaInstance = inst;
           }
         } catch (e) {
+          console.warn("[TokenWall] \u26A0\uFE0F Magika not available. Falling back to heuristic detection.");
         }
       }
       return _magikaInstance;
@@ -39502,6 +39962,7 @@ ${JSON.stringify(walk(parsed), null, 2)}
         const originalTokens = (0, estimators_1.countTokens)(prompt, model);
         let allCachedContents = [];
         let compressionMap = [];
+        let chunkedBlocks = [];
         const coverage = {
           json: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0 },
           code: { magikaDetected: 0, regexTotalDetected: 0, successfullyOptimized: 0, fallbackParseFailure: 0, fallbackOptOutSystemGuard: 0, fallbackOptOutUserConfig: 0 },
@@ -39532,6 +39993,9 @@ ${JSON.stringify(walk(parsed), null, 2)}
         if (codeResult.compressionMap) {
           compressionMap.push(...codeResult.compressionMap);
         }
+        if (codeResult.chunkedBlocks) {
+          chunkedBlocks.push(...codeResult.chunkedBlocks);
+        }
         if (coverage.code.magikaDetected > 0 && coverage.code.regexTotalDetected === 0) {
           coverage.sampledFailures.push({ type: "magika_mismatch", reason: "Magika detected code, but regex found no fence", snippet: prompt.substring(0, 200) });
         }
@@ -39553,7 +40017,8 @@ ${JSON.stringify(walk(parsed), null, 2)}
           savingsPercent,
           cachedContents: allCachedContents,
           coverage,
-          compressionMap
+          compressionMap,
+          chunkedBlocks
         };
       }
     };
@@ -49948,9 +50413,19 @@ var require_dist16 = __commonJS({
       if (!compressionMap || compressionMap.length === 0)
         return { target: targetContent, replacement: replacementContent };
       for (const entry of compressionMap) {
-        const { original, compressed } = entry;
+        const { original, compressed, mappings } = entry;
         const idx = compressed.indexOf(targetContent);
         if (idx !== -1) {
+          if (mappings && mappings.length > 0) {
+            try {
+              const { target, replacement, verified } = prompt_optimizer_1.ASTDiffer.runASTDiff(original, compressed, targetContent, replacementContent, mappings);
+              if (verified) {
+                return { target, replacement };
+              }
+            } catch (e) {
+              console.error("[TokenWall Gateway] ASTDiffer failed, falling back to line mapping", e);
+            }
+          }
           const prefix = compressed.substring(0, idx);
           const startLine = prefix.split("\n").length - 1;
           const endLine = startLine + targetContent.split("\n").length - 1;
@@ -50013,7 +50488,7 @@ var require_dist16 = __commonJS({
               outCompressionMap.push(...opt.compressionMap);
             }
           } else if (cleanMsg.role === "tool") {
-            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model);
+            newText = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(newText, model, outCachedContents);
           }
         } catch (e) {
           console.error("[TokenWall Gateway] Message optimization failed, falling open:", e.message);
@@ -50046,7 +50521,7 @@ var require_dist16 = __commonJS({
             if (b.type === "tool_result") {
               if (typeof b.content === "string") {
                 try {
-                  b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model);
+                  b.content = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(b.content, model, outCachedContents);
                 } catch (e) {
                   console.error("[TokenWall Gateway] ToolPayload crushing failed, falling open");
                 }
@@ -50054,7 +50529,7 @@ var require_dist16 = __commonJS({
                 b.content.forEach((part) => {
                   if (part.type === "text" && typeof part.text === "string") {
                     try {
-                      part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model);
+                      part.text = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(part.text, model, outCachedContents);
                     } catch (e) {
                       console.error("[TokenWall Gateway] ToolPayload array part crushing failed, falling open");
                     }
@@ -50110,6 +50585,21 @@ var require_dist16 = __commonJS({
           } else if (newText) {
             origContent.parts.push({ text: newText });
           }
+          origContent.parts.forEach((p) => {
+            if (p.functionResponse && p.functionResponse.response) {
+              try {
+                const responseStr = typeof p.functionResponse.response === "string" ? p.functionResponse.response : JSON.stringify(p.functionResponse.response);
+                const optimizedStr = prompt_optimizer_1.ToolPayloadCrusher.optimizeToolResult(responseStr, model, outCachedContents);
+                try {
+                  p.functionResponse.response = JSON.parse(optimizedStr);
+                } catch (e) {
+                  p.functionResponse.response = { result: optimizedStr };
+                }
+              } catch (e) {
+                console.error("[TokenWall Gateway] Gemini functionResponse crushing failed, falling open");
+              }
+            }
+          });
         }
       }
       return newContents;
@@ -51168,6 +51658,20 @@ ${runningTotal.toLocaleString()}`);
         const optimizedEstimation = (0, estimators_1.calculatePreFlightEstimation)(finalRequest);
         savedTokens = Math.max(0, estimation.estimatedInputTokens - optimizedEstimation.estimatedInputTokens);
         console.log(terminal_ui_1.c.green(`\u2714 Applied Prompt Optimization (Estimated savings: ${savedTokens} tokens)`));
+        if (contextReport.coverage) {
+          if (contextReport.coverage.json?.successfullyOptimized > 0) {
+            console.log(terminal_ui_1.c.blue(`  \u21B3 \u2705 AST Structure Masking (JSON) applied to ${contextReport.coverage.json.successfullyOptimized} block(s).`));
+          }
+          if (contextReport.coverage.code?.successfullyOptimized > 0) {
+            console.log(terminal_ui_1.c.blue(`  \u21B3 \u2705 AST Code Sparsification applied to ${contextReport.coverage.code.successfullyOptimized} block(s).`));
+          }
+        }
+        if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
+          console.log(terminal_ui_1.c.blue(`  \u21B3 \u2705 Reversible Content Compression (CCR) generated ${contextReport.cachedContents.length} cache reference(s).`));
+        }
+        if (globalCompressionMap && globalCompressionMap.length > 0) {
+          console.log(terminal_ui_1.c.blue(`  \u21B3 \u2705 Structural AST Diffing (Write-Path Mapping) initialized.`));
+        }
         if (contextReport.cachedContents && contextReport.cachedContents.length > 0) {
           for (const cc of contextReport.cachedContents) {
             db2.saveCachedContent(cc.id, requestId, cc.content);

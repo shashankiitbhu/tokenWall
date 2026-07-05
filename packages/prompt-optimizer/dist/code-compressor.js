@@ -13,11 +13,13 @@ const tsParser = new tree_sitter_1.default();
 tsParser.setLanguage(tree_sitter_typescript_1.default.typescript);
 const tsxParser = new tree_sitter_1.default();
 tsxParser.setLanguage(tree_sitter_typescript_1.default.tsx);
+const code_chunker_1 = require("./code-chunker");
 class CodeCompressor {
     /**
      * Scans a prompt for JS/TS code blocks and `<file_content>` blocks,
      * parses them into an AST using Tree-sitter, strips only actual comment nodes,
      * and skeletonizes large function bodies by masking them with a CCR token.
+     * Also performs AST-aware chunking on the optimized source.
      */
     static compress(prompt, disableCodeCompression = false, optOutReason = null, metrics) {
         // Count regex total detected
@@ -32,26 +34,33 @@ class CodeCompressor {
         }
         if (disableCodeCompression) {
             if (metrics && totalDetected > 0) {
-                if (optOutReason === 'system_guard')
+                if (optOutReason === 'system_guard') {
+                    console.warn(`[TokenWall] ⚠️ Write-Path System Guard active: Skipping AST code compression to preserve write-path integrity.`);
                     metrics.code.fallbackOptOutSystemGuard += totalDetected;
-                else
+                }
+                if (optOutReason === 'user_config')
                     metrics.code.fallbackOptOutUserConfig += totalDetected;
             }
-            return { optimizedText: prompt, cachedContents: [], compressionMap: [] };
+            return { optimizedText: prompt, cachedContents: [], compressionMap: [], chunkedBlocks: [] };
         }
         const cachedContents = [];
         const compressionMap = [];
+        const chunkedBlocks = [];
         let optimized = prompt.replace(mdBlockRegex, (match, lang, code) => {
             try {
-                const sparsified = this.sparsifyCode(code, lang, cachedContents);
+                const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, lang, cachedContents);
                 if (metrics)
                     metrics.code.successfullyOptimized++;
                 if (sparsified !== code) {
-                    compressionMap.push({ original: code, compressed: sparsified });
+                    compressionMap.push({ original: code, compressed: sparsified, mappings });
+                }
+                if (chunks.length > 0 && scopeTree) {
+                    chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2, 9)}`, language: lang, chunks, scopeTree });
                 }
                 return `\`\`\`${lang}\n${sparsified}\n\`\`\``;
             }
             catch (e) {
+                console.warn(`[TokenWall] ⚠️ Tree-sitter parse error (${lang}). Falling open to uncompressed code:`, e.message);
                 if (metrics) {
                     metrics.code.fallbackParseFailure++;
                     metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
@@ -62,16 +71,20 @@ class CodeCompressor {
         });
         optimized = optimized.replace(xmlBlockRegex, (match, ext, code) => {
             try {
-                const sparsified = this.sparsifyCode(code, ext, cachedContents);
+                const { sparsified, chunks, scopeTree, mappings } = this.sparsifyCode(code, ext, cachedContents);
                 if (metrics)
                     metrics.code.successfullyOptimized++;
                 if (sparsified !== code) {
-                    compressionMap.push({ original: code, compressed: sparsified });
+                    compressionMap.push({ original: code, compressed: sparsified, mappings });
+                }
+                if (chunks.length > 0 && scopeTree) {
+                    chunkedBlocks.push({ id: `block_${Math.random().toString(36).substring(2, 9)}`, language: ext, chunks, scopeTree });
                 }
                 // Replace only the inner code content, keep the XML tags intact
                 return match.replace(code, `\n${sparsified}\n`);
             }
             catch (e) {
+                console.warn(`[TokenWall] ⚠️ Tree-sitter parse error (${ext}). Falling open to uncompressed xml block code:`, e.message);
                 if (metrics) {
                     metrics.code.fallbackParseFailure++;
                     metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
@@ -79,7 +92,7 @@ class CodeCompressor {
                 return match;
             }
         });
-        return { optimizedText: optimized, cachedContents, compressionMap };
+        return { optimizedText: optimized, cachedContents, compressionMap, chunkedBlocks };
     }
     /**
      * Parses the code with Tree-sitter, splices out comment nodes, and skeletonizes function bodies.
@@ -139,11 +152,24 @@ class CodeCompressor {
             for (const node of removeNodes) {
                 result = result.slice(0, node.startIndex) + (node.replaceWith || '') + result.slice(node.endIndex);
             }
-            return result.trim();
+            const sparsified = result.trim();
+            // Parse again for chunking so tree offsets align with modified code
+            let chunks = [];
+            let scopeTree = null;
+            try {
+                const sparsifiedTree = parser.parse(sparsified);
+                const chunkResult = code_chunker_1.CodeChunker.chunk(sparsifiedTree, sparsified);
+                chunks = chunkResult.chunks;
+                scopeTree = chunkResult.scopeTree;
+            }
+            catch (ce) {
+                console.error("[TokenWall CodeCompressor] CodeChunker failed:", ce);
+            }
+            return { sparsified, chunks, scopeTree, mappings: removeNodes.map(n => ({ originalStart: n.startIndex, originalEnd: n.endIndex, replaceWith: n.replaceWith || '' })) };
         }
         catch (e) {
-            console.error("[TokenWall CodeCompressor] Tree-sitter parsing failed:", e);
-            return code;
+            // If parsing fails, return original
+            return { sparsified: code, chunks: [], scopeTree: null, mappings: [] };
         }
     }
 }

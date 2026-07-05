@@ -202,7 +202,7 @@ async function getMagika() {
         _magikaInstance = inst;
       }
     } catch (e) {
-      // Magika not available
+      console.warn('[TokenWall] ⚠️ Magika not available. Falling back to heuristic detection.');
     }
   }
   return _magikaInstance;

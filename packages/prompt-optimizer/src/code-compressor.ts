@@ -82,10 +82,13 @@ export class CodeCompressor {
 
     if (disableCodeCompression) {
       if (metrics && totalDetected > 0) {
-        if (optOutReason === 'system_guard') metrics.code.fallbackOptOutSystemGuard += totalDetected;
-        else metrics.code.fallbackOptOutUserConfig += totalDetected;
+        if (optOutReason === 'system_guard') {
+          console.warn(`[TokenWall] ⚠️ Write-Path System Guard active: Skipping AST code compression to preserve write-path integrity.`);
+          metrics.code.fallbackOptOutSystemGuard += totalDetected;
+        }
+        if (optOutReason === 'user_config') metrics.code.fallbackOptOutUserConfig += totalDetected;
       }
-      return { optimizedText: prompt, cachedContents: [], compressionMap: [] };
+      return { optimizedText: prompt, cachedContents: [], compressionMap: [], chunkedBlocks: [] };
     }
 
     const cachedContents: CachedContent[] = [];
@@ -104,6 +107,7 @@ export class CodeCompressor {
         }
         return `\`\`\`${lang}\n${sparsified}\n\`\`\``;
       } catch (e: any) {
+        console.warn(`[TokenWall] ⚠️ Tree-sitter parse error (${lang}). Falling open to uncompressed code:`, e.message);
         if (metrics) {
           metrics.code.fallbackParseFailure++;
           metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
@@ -126,6 +130,7 @@ export class CodeCompressor {
         // Replace only the inner code content, keep the XML tags intact
         return match.replace(code, `\n${sparsified}\n`);
       } catch (e: any) {
+        console.warn(`[TokenWall] ⚠️ Tree-sitter parse error (${ext}). Falling open to uncompressed xml block code:`, e.message);
         if (metrics) {
           metrics.code.fallbackParseFailure++;
           metrics.sampledFailures.push({ type: 'parse_failure', reason: e.message || 'Tree-sitter error', snippet: code.substring(0, 200) });
