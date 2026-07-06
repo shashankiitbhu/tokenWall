@@ -821,6 +821,7 @@ async function proxyStreamWithCCR(
   let cacheReadAccumulated = 0;
   let streamFailed = false;
   let streamCancelled = false;
+  let ccrWasFetched = false;
 
   return new ReadableStream({
     async start(controller) {
@@ -960,6 +961,7 @@ async function proxyStreamWithCCR(
         }
 
         if (isCCRToolCall) {
+          ccrWasFetched = true;
           let contentId = '';
           if (provider === 'openai') {
             const ccrCall = assistantToolCallsAccumulated.find(tc => tc.function.name === 'tokenwall_retrieve_content');
@@ -1173,6 +1175,9 @@ async function proxyStreamWithCCR(
 
       try {
         await runTurn(requestBody);
+        if (hasCCR && !ccrWasFetched) {
+          telemetryLogger.emitEvent({ eventType: 'ccr_ignored', sessionId, requestId, metadata: { warning: 'Model responded without fetching cached content. Response may be degraded.' } });
+        }
         telemetryLogger.emitEvent({ eventType: 'request_stream_completed', sessionId, requestId });
         controller.close();
       } catch (err: any) {
@@ -1577,7 +1582,8 @@ async function handleInterception(
     );
   }
 
-  let finalRequestBody = request.body;
+  // Deep copy to prevent compounding mutations on system arrays (Note: drops undefined/functions, which is safe for LLM payloads)
+  let finalRequestBody = JSON.parse(JSON.stringify(request.body));
   let finalRequest = parsedRequest;
   let savedTokens = 0;
   const globalCompressionMap: any[] = [];
@@ -1588,10 +1594,7 @@ async function handleInterception(
     
     // Re-serialize back to provider schema while preserving non-text blocks
     if (provider === 'openai' || provider === 'anthropic') {
-      finalRequestBody = {
-        ...request.body,
-        messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
-      };
+      finalRequestBody.messages = await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId);
       
       // Optimize top-level Anthropic system prompt
       if (provider === 'anthropic' && finalRequestBody.system) {
@@ -1614,10 +1617,7 @@ async function handleInterception(
         }
       }
     } else if (provider === 'gemini') {
-      finalRequestBody = {
-        ...request.body,
-        contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
-      };
+      finalRequestBody.contents = await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId);
       
       // Optimize top-level Gemini systemInstruction
       if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
@@ -1697,34 +1697,36 @@ async function handleInterception(
     }
 
     // Write log for optimized request including the full body (top-level system prompts)
-    try {
-      const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
-      if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-      const logPath = path.join(logDir, 'latest_optimized_request.json');
+    if (configManager.getConfig().enablePayloadLogging !== false) {
+      try {
+        const logDir = path.join(os.homedir(), '.tokenwall', 'logs');
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        const logPath = path.join(logDir, 'latest_optimized_request.json');
 
-      const unoptimizedTokens = estimation.estimatedInputTokens;
-      const optimizedTokens = optimizedEstimation.estimatedInputTokens;
-      const pct = unoptimizedTokens > 0 ? Math.round((savedTokens / unoptimizedTokens) * 100) : 0;
+        const unoptimizedTokens = estimation.estimatedInputTokens;
+        const optimizedTokens = optimizedEstimation.estimatedInputTokens;
+        const pct = unoptimizedTokens > 0 ? Math.round((savedTokens / unoptimizedTokens) * 100) : 0;
 
-      const logStructure = {
-        unoptimized: {
-          total_tokens: unoptimizedTokens,
-          payload: request.body
-        },
-        optimized: {
-          total_tokens: optimizedTokens,
-          payload: finalRequestBody
-        },
-        summary: {
-          tokens_saved: savedTokens,
-          savings_percent: `${pct}%`
-        }
-      };
+        const logStructure = {
+          unoptimized: {
+            total_tokens: unoptimizedTokens,
+            payload: request.body
+          },
+          optimized: {
+            total_tokens: optimizedTokens,
+            payload: finalRequestBody
+          },
+          summary: {
+            tokens_saved: savedTokens,
+            savings_percent: `${pct}%`
+          }
+        };
 
-      fs.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
-      console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
-    } catch (err) {
-      console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
+        fs.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), 'utf8');
+        console.log(c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+      } catch (err) {
+        console.log(c.yellow(`[TokenWall] Failed to save optimized request log.`));
+      }
     }
   } else if (action === 'switch_model') {
     const recommendedModel = chosenModel || (routingOptions.alternatives.length > 0 ? routingOptions.alternatives[0].model : parsedRequest.model);
