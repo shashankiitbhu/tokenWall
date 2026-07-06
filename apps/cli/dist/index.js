@@ -51200,6 +51200,7 @@ ${steeringMsg}`;
       let cacheReadAccumulated = 0;
       let streamFailed = false;
       let streamCancelled = false;
+      let ccrWasFetched = false;
       return new ReadableStream({
         async start(controller) {
           async function runTurn(body) {
@@ -51340,6 +51341,7 @@ ${steeringMsg}`;
               throw err;
             }
             if (isCCRToolCall) {
+              ccrWasFetched = true;
               let contentId = "";
               if (provider === "openai") {
                 const ccrCall = assistantToolCallsAccumulated.find((tc) => tc.function.name === "tokenwall_retrieve_content");
@@ -51586,6 +51588,9 @@ data: ${JSON.stringify({ type: "message_stop" })}
           }
           try {
             await runTurn(requestBody);
+            if (hasCCR && !ccrWasFetched) {
+              telemetryLogger.emitEvent({ eventType: "ccr_ignored", sessionId, requestId, metadata: { warning: "Model responded without fetching cached content. Response may be degraded." } });
+            }
             telemetryLogger.emitEvent({ eventType: "request_stream_completed", sessionId, requestId });
             controller.close();
           } catch (err) {
@@ -51903,7 +51908,7 @@ ${runningTotal.toLocaleString()}`);
         telemetryLogger.reconcileRequest(requestId, 0, "blocked", "cancelled");
         return sendBlockedResponse(reply, provider, 400, "Request cancelled by user in TokenWall.", "cancelled_by_user", "forbidden");
       }
-      let finalRequestBody = request.body;
+      let finalRequestBody = JSON.parse(JSON.stringify(request.body));
       let finalRequest = parsedRequest;
       let savedTokens = 0;
       const globalCompressionMap = [];
@@ -51911,10 +51916,7 @@ ${runningTotal.toLocaleString()}`);
         const cleanMsgs = contextReport.cleanMessages;
         const lastUserIdx = cleanMsgs.map((m) => m.role).lastIndexOf("user");
         if (provider === "openai" || provider === "anthropic") {
-          finalRequestBody = {
-            ...request.body,
-            messages: await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
-          };
+          finalRequestBody.messages = await getOptimizedMessages(request.body.messages, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId);
           if (provider === "anthropic" && finalRequestBody.system) {
             if (typeof finalRequestBody.system === "string") {
               const opt = await promptOptimizer.optimize(finalRequestBody.system, parsedRequest.model, { disableCodeCompression: false, disableJsonMasking: false, optOutReason: null });
@@ -51940,10 +51942,7 @@ ${runningTotal.toLocaleString()}`);
             }
           }
         } else if (provider === "gemini") {
-          finalRequestBody = {
-            ...request.body,
-            contents: await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId)
-          };
+          finalRequestBody.contents = await getOptimizedGeminiContents(request.body.contents, cleanMsgs, parsedRequest.model, false, contextReport.cachedContents, contextReport.coverage, globalCompressionMap, lastUserIdx, sessionId);
           if (finalRequestBody.systemInstruction && Array.isArray(finalRequestBody.systemInstruction.parts)) {
             for (let i = 0; i < finalRequestBody.systemInstruction.parts.length; i++) {
               const part = finalRequestBody.systemInstruction.parts[i];
@@ -52009,32 +52008,34 @@ ${runningTotal.toLocaleString()}`);
             }
           });
         }
-        try {
-          const logDir = path_1.default.join(os_1.default.homedir(), ".tokenwall", "logs");
-          if (!fs_1.default.existsSync(logDir))
-            fs_1.default.mkdirSync(logDir, { recursive: true });
-          const logPath = path_1.default.join(logDir, "latest_optimized_request.json");
-          const unoptimizedTokens = estimation.estimatedInputTokens;
-          const optimizedTokens = optimizedEstimation.estimatedInputTokens;
-          const pct = unoptimizedTokens > 0 ? Math.round(savedTokens / unoptimizedTokens * 100) : 0;
-          const logStructure = {
-            unoptimized: {
-              total_tokens: unoptimizedTokens,
-              payload: request.body
-            },
-            optimized: {
-              total_tokens: optimizedTokens,
-              payload: finalRequestBody
-            },
-            summary: {
-              tokens_saved: savedTokens,
-              savings_percent: `${pct}%`
-            }
-          };
-          fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), "utf8");
-          console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
-        } catch (err) {
-          console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
+        if (configManager2.getConfig().enablePayloadLogging !== false) {
+          try {
+            const logDir = path_1.default.join(os_1.default.homedir(), ".tokenwall", "logs");
+            if (!fs_1.default.existsSync(logDir))
+              fs_1.default.mkdirSync(logDir, { recursive: true });
+            const logPath = path_1.default.join(logDir, "latest_optimized_request.json");
+            const unoptimizedTokens = estimation.estimatedInputTokens;
+            const optimizedTokens = optimizedEstimation.estimatedInputTokens;
+            const pct = unoptimizedTokens > 0 ? Math.round(savedTokens / unoptimizedTokens * 100) : 0;
+            const logStructure = {
+              unoptimized: {
+                total_tokens: unoptimizedTokens,
+                payload: request.body
+              },
+              optimized: {
+                total_tokens: optimizedTokens,
+                payload: finalRequestBody
+              },
+              summary: {
+                tokens_saved: savedTokens,
+                savings_percent: `${pct}%`
+              }
+            };
+            fs_1.default.writeFileSync(logPath, JSON.stringify(logStructure, null, 2), "utf8");
+            console.log(terminal_ui_1.c.magenta(`[TokenWall] Saved full optimized request payload to ${logPath} for inspection.`));
+          } catch (err) {
+            console.log(terminal_ui_1.c.yellow(`[TokenWall] Failed to save optimized request log.`));
+          }
         }
       } else if (action === "switch_model") {
         const recommendedModel = chosenModel || (routingOptions.alternatives.length > 0 ? routingOptions.alternatives[0].model : parsedRequest.model);

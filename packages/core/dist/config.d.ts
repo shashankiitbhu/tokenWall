@@ -22,6 +22,7 @@ export interface TokenWallConfig {
     jsonCrushing?: boolean;
     codeCompression?: boolean;
     cacheAlignment?: boolean;
+    enablePayloadLogging?: boolean;
     importance?: {
         policy: 'conservative' | 'balanced' | 'aggressive';
     };
